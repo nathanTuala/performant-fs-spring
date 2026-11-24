@@ -27,7 +27,8 @@ public abstract class IntegrationTest {
     /** Blobs go to a throwaway directory; small chunks keep multi-chunk tests fast. */
     @DynamicPropertySource
     static void testSettings(DynamicPropertyRegistry registry) {
-        registry.add("pfs.data-dir", () -> tempDataDir().toString());
+        registry.add("pfs.data-dir", () -> tempDataDir().resolve("data").toString());
+        registry.add("pfs.web-dir", () -> tempDataDir().resolve("web").toString());
         registry.add("pfs.chunk-size", () -> "1MB");
         registry.add("pfs.fast-path-max", () -> "1MB");
         // Tests run maintenance explicitly; the scheduler must not race them.
@@ -40,6 +41,10 @@ public abstract class IntegrationTest {
         if (dataDir == null) {
             try {
                 dataDir = Files.createTempDirectory("pfs-test-");
+                // A stand-in for the built web app (web/dist).
+                Path web = Files.createDirectories(dataDir.resolve("web").resolve("assets"));
+                Files.writeString(dataDir.resolve("web").resolve("index.html"), "<!doctype html><title>Files</title>");
+                Files.writeString(web.resolve("app-1a2b3c.js"), "console.log('app')");
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }

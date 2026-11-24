@@ -21,6 +21,7 @@ import org.springframework.util.unit.DataSize;
  * @param trashRetention    trashed items are purged after this long
  * @param maintenanceInterval pause between background maintenance runs
  * @param secureCookies     mark the session cookie Secure (on in production, behind HTTPS)
+ * @param webDir            the built web app to serve (web/dist); unset in development, where Vite serves it
  */
 @ConfigurationProperties("pfs")
 public record AppProperties(
@@ -33,4 +34,5 @@ public record AppProperties(
         @DefaultValue("30d") Duration sessionTtl,
         @DefaultValue("30d") Duration trashRetention,
         @DefaultValue("1m") Duration maintenanceInterval,
-        @DefaultValue("false") boolean secureCookies) {}
+        @DefaultValue("false") boolean secureCookies,
+        Path webDir) {}
