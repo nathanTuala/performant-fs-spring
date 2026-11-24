@@ -4,6 +4,7 @@ import com.performantfs.http.ApiException;
 import com.performantfs.http.ErrorCode;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -58,6 +59,26 @@ public class NodeRepository {
                 .param(id)
                 .query((rs, n) -> new Crumb(rs.getObject("id", UUID.class), rs.getString("name")))
                 .list();
+    }
+
+    /** {@link #path} for many nodes in one query: one recursive walk per id, all in one statement. */
+    public Map<UUID, List<Crumb>> paths(List<UUID> ids) {
+        Map<UUID, List<Crumb>> paths = new LinkedHashMap<>();
+        ids.forEach(id -> paths.put(id, new ArrayList<>()));
+        if (ids.isEmpty()) return paths;
+        db.sql("""
+                        WITH RECURSIVE anc AS (
+                          SELECT n.id AS leaf, n.parent_id AS next, 0 AS depth, NULL::uuid AS id, NULL::text AS name
+                          FROM nodes n WHERE n.id = ANY(CAST(? AS uuid[]))
+                          UNION ALL
+                          SELECT a.leaf, p.parent_id, a.depth + 1, p.id, p.name FROM anc a JOIN nodes p ON p.id = a.next
+                        )
+                        SELECT leaf, id, name FROM anc WHERE depth > 0 ORDER BY leaf, depth DESC""")
+                .param(ids.stream().map(UUID::toString).toArray(String[]::new))
+                .query(rs -> {
+                    paths.get(rs.getObject("leaf", UUID.class)).add(new Crumb(rs.getObject("id", UUID.class), rs.getString("name")));
+                });
+        return paths;
     }
 
     /**
