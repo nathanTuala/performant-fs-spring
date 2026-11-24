@@ -1,8 +1,16 @@
 package com.performantfs.nodes;
 
 import com.performantfs.http.ApiException;
+import com.performantfs.http.ErrorCode;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.IntStream;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -92,5 +100,66 @@ public class NodeRepository {
             next = new ListingCursor(last.node().isFolder(), last.sortKey(), last.node().id()).encode();
         }
         return new Page<>(page.stream().map(h -> h.node().toDto()).toList(), next);
+    }
+
+    // ------------------------------------------------------------------ writes
+
+    private static final int MAX_RENAME_ROUNDS = 5;
+    private static final int CANDIDATES_PER_ROUND = 50;
+
+    /**
+     * Runs {@code attempt(name)}; when it reports a sibling-name clash (empty), either fails with
+     * 409 name_conflict or retries with the first free "name (n).ext". The unique index is the
+     * source of truth, so this is safe against concurrent writers.
+     */
+    public <T> T withUniqueName(UUID parentId, String name, ConflictPolicy policy, Function<String, Optional<T>> attempt) {
+        Optional<T> first = attempt.apply(name);
+        if (first.isPresent()) return first.get();
+        if (policy == ConflictPolicy.ERROR) {
+            throw new ApiException(ErrorCode.NAME_CONFLICT, "An item named \"" + name + "\" already exists here",
+                    Map.of("name", name));
+        }
+        int next = 1;
+        for (int round = 0; round < MAX_RENAME_ROUNDS; round++) {
+            int from = next;
+            List<String> candidates = IntStream.range(from, from + CANDIDATES_PER_ROUND).mapToObj(i -> Names.numbered(name, i)).toList();
+            next += CANDIDATES_PER_ROUND;
+            Set<String> taken = new HashSet<>(db.sql("""
+                            SELECT lower(name) FROM nodes
+                            WHERE parent_id = ? AND deleted_at IS NULL AND lower(name) = ANY(?)""")
+                    .param(parentId)
+                    .param(candidates.stream().map(c -> c.toLowerCase(Locale.ROOT)).toArray(String[]::new))
+                    .query(String.class)
+                    .list());
+            for (String candidate : candidates) {
+                if (taken.contains(candidate.toLowerCase(Locale.ROOT))) continue;
+                Optional<T> result = attempt.apply(candidate);
+                if (result.isPresent()) return result.get(); // otherwise lost a race; try the next
+            }
+        }
+        throw new ApiException(ErrorCode.NAME_CONFLICT, "Could not find a free name for \"" + name + "\"", Map.of("name", name));
+    }
+
+    /** Inserts a node, resolving a sibling-name clash per {@code policy}. */
+    public NodeRow insert(NewNode node, ConflictPolicy policy) {
+        return withUniqueName(node.parentId(), node.name(), policy, candidate -> db.sql("""
+                        INSERT INTO nodes (owner_id, parent_id, is_folder, name, size, mime, blob_hash)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (parent_id, lower(name)) WHERE deleted_at IS NULL DO NOTHING
+                        RETURNING %s""".formatted(NodeRow.COLUMNS))
+                .params(node.ownerId(), node.parentId(), node.isFolder(), candidate, node.size(), node.mime(), node.blobHash())
+                .query(NodeRow.MAPPER)
+                .optional());
+    }
+
+    /**
+     * Per-user tree lock, held until the transaction ends. Structural changes (move, trash,
+     * restore, purge) take it exclusively: two moves that each pass their own cycle check could
+     * otherwise both commit. Inserts take it shared, so they run in parallel with each other but
+     * never land in a folder that a concurrent trash is sweeping up.
+     */
+    public void lockTree(UUID ownerId, boolean shared) {
+        String fn = shared ? "pg_advisory_xact_lock_shared" : "pg_advisory_xact_lock";
+        db.sql("SELECT " + fn + "(hashtextextended(?, 42))").param(ownerId.toString()).query(Object.class).single();
     }
 }
