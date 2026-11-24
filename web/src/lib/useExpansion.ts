@@ -30,6 +30,8 @@ export interface Expansion {
   refresh: (ids?: string[]) => void;
   /** Optimistic edits to the cached contents, mirroring what the server is being asked to do. */
   remove: (ids: string[]) => void;
+  /** Drops folders that no longer exist (e.g. just deleted): closed, uncached, never re-fetched. */
+  forget: (ids: string[]) => void;
   rename: (id: string, name: string) => void;
   /** The top-level items with every expanded folder's contents spliced in below it. */
   flatten: (top: NodeDto[]) => TreeRow[];
@@ -131,6 +133,21 @@ export function useExpansion(sort: SortKey, dir: SortDir): Expansion {
     });
   }, []);
 
+  // Deleting a folder takes everything open inside it along, so those go too. The refresh that
+  // follows a delete runs after the server answers, by which time these updates have rendered.
+  const forget = useCallback((ids: string[]) => {
+    const gone = new Set<string>();
+    const queue = [...ids];
+    while (queue.length > 0) {
+      const id = queue.pop()!;
+      if (gone.has(id)) continue;
+      gone.add(id);
+      for (const child of groupsRef.current.get(id)?.items ?? []) if (child.kind === 'folder') queue.push(child.id);
+    }
+    setExpanded((prev) => new Set([...prev].filter((id) => !gone.has(id))));
+    setGroups((prev) => new Map([...prev].filter(([id]) => !gone.has(id))));
+  }, []);
+
   const rename = useCallback((id: string, name: string) => {
     setGroups((prev) => {
       const next = new Map<string, Group>();
@@ -173,6 +190,7 @@ export function useExpansion(sort: SortKey, dir: SortDir): Expansion {
     loadMore,
     refresh,
     remove,
+    forget,
     rename,
     flatten,
   };

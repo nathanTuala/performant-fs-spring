@@ -82,7 +82,9 @@ export function FileList({ listing, sort, dir, onSort, actions, emptyHint }: Pro
   }, [refresh]);
 
   const trash = (nodes: NodeDto[]) => {
-    expansion.remove(nodes.map((n) => n.id));
+    const ids = nodes.map((n) => n.id);
+    expansion.remove(ids);
+    expansion.forget(ids); // a deleted folder's contents can't be listed any more
     void actions.trash(nodes).finally(() => refresh());
   };
   const move = (items: MovedItem[], targetId: string) => {
