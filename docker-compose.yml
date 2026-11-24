@@ -13,5 +13,18 @@ services:
       interval: 2s
       retries: 30
 
+  app:
+    build: .
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/pfs
+      SPRING_DATASOURCE_USERNAME: pfs
+      SPRING_DATASOURCE_PASSWORD: pfs
+    # The UI and API on http://localhost:8091 (8090 is left for ./gradlew bootRun).
+    ports: ["8091:8080"]
+    volumes: [blobs:/data]
+
 volumes:
   db:
+  blobs:

@@ -40,3 +40,12 @@ dependencies {
 tasks.withType<Test> {
     useJUnitPlatform()
 }
+
+// One runnable jar with a fixed name, for the Docker image.
+tasks.bootJar {
+    archiveFileName = "app.jar"
+}
+
+tasks.jar {
+    enabled = false
+}
