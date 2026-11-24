@@ -162,4 +162,114 @@ public class NodeRepository {
         String fn = shared ? "pg_advisory_xact_lock_shared" : "pg_advisory_xact_lock";
         db.sql("SELECT " + fn + "(hashtextextended(?, 42))").param(ownerId.toString()).query(Object.class).single();
     }
+
+    // ------------------------------------------------------------------ structure
+
+    /** True when {@code ancestorId} is {@code nodeId} itself or one of its ancestors. */
+    public boolean isAncestorOrSelf(UUID ancestorId, UUID nodeId) {
+        return db.sql("""
+                        WITH RECURSIVE up AS (
+                          SELECT id, parent_id FROM nodes WHERE id = ?
+                          UNION ALL
+                          SELECT n.id, n.parent_id FROM nodes n JOIN up ON n.id = up.parent_id
+                        )
+                        SELECT EXISTS (SELECT 1 FROM up WHERE id = ?)""")
+                .params(nodeId, ancestorId)
+                .query(Boolean.class)
+                .single();
+    }
+
+    /** Moves and/or renames one node. Throws DuplicateKeyException on a sibling-name clash. */
+    public NodeRow moveTo(UUID id, UUID parentId, String name) {
+        return db.sql("UPDATE nodes SET parent_id = ?, name = ?, updated_at = now() WHERE id = ? RETURNING " + NodeRow.COLUMNS)
+                .params(parentId, name, id)
+                .query(NodeRow.MAPPER)
+                .single();
+    }
+
+    /** Soft-deletes a node and every live descendant in one statement, tagged with one trash id. */
+    public void trashSubtree(UUID id, UUID trashId) {
+        db.sql("""
+                        WITH RECURSIVE sub AS (
+                          SELECT id FROM nodes WHERE id = ?
+                          UNION ALL
+                          SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.deleted_at IS NULL
+                        )
+                        UPDATE nodes SET deleted_at = now(), trash_id = ? WHERE id IN (SELECT id FROM sub)""")
+                .params(id, trashId)
+                .update();
+    }
+
+    /** Brings one trashed node back under {@code parentId}. Throws DuplicateKeyException on a clash. */
+    public NodeRow untrashTo(UUID id, UUID parentId, String name) {
+        return db.sql("UPDATE nodes SET parent_id = ?, name = ?, deleted_at = NULL, trash_id = NULL WHERE id = ? RETURNING "
+                        + NodeRow.COLUMNS)
+                .params(parentId, name, id)
+                .query(NodeRow.MAPPER)
+                .single();
+    }
+
+    /** Restores everything else that was trashed together with a node. */
+    public void untrashGroup(UUID trashId) {
+        db.sql("UPDATE nodes SET deleted_at = NULL, trash_id = NULL WHERE trash_id = ?").param(trashId).update();
+    }
+
+    /** Items the user deleted directly, newest first (not the descendants that went with them). */
+    public List<NodeDto> listTrash(UUID ownerId) {
+        return db.sql("""
+                        SELECT %s FROM nodes n JOIN nodes p ON p.id = n.parent_id
+                        WHERE n.owner_id = ? AND n.deleted_at IS NOT NULL
+                          AND (p.deleted_at IS NULL OR p.trash_id IS DISTINCT FROM n.trash_id)
+                        ORDER BY n.deleted_at DESC
+                        LIMIT 1000""".formatted(NodeRow.columns("n")))
+                .param(ownerId)
+                .query(NodeRow.MAPPER)
+                .list()
+                .stream()
+                .map(NodeRow::toDto)
+                .toList();
+    }
+
+    /**
+     * Permanently deletes trashed subtrees in one statement: cancels uploads still aimed at them,
+     * deletes the rows, decrements blob refcounts and releases the bytes and reservations from the
+     * owner's quota. Blobs that reach zero are left for garbage collection.
+     *
+     * @param trashRootIds the trashed items to purge, or null for the user's whole trash
+     * @return how many nodes were deleted
+     */
+    public int purge(UUID ownerId, List<UUID> trashRootIds) {
+        String roots = trashRootIds == null
+                ? "SELECT id FROM nodes WHERE owner_id = :owner AND deleted_at IS NOT NULL"
+                : "SELECT id FROM nodes WHERE owner_id = :owner AND deleted_at IS NOT NULL AND id = ANY(CAST(:ids AS uuid[]))";
+        var stmt = db.sql("""
+                        WITH RECURSIVE sub AS (
+                          %s
+                          UNION
+                          SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id
+                        ),
+                        cancelled AS (
+                          UPDATE upload_sessions SET status = 'cancelled', updated_at = now()
+                          WHERE parent_id IN (SELECT id FROM sub) AND status IN ('open', 'completing')
+                          RETURNING size
+                        ),
+                        del AS (
+                          DELETE FROM nodes WHERE id IN (SELECT id FROM sub) RETURNING blob_hash, size
+                        ),
+                        dec AS (
+                          UPDATE blobs b SET refcount = b.refcount - c.n
+                          FROM (SELECT blob_hash, count(*)::int AS n FROM del WHERE blob_hash IS NOT NULL GROUP BY blob_hash) c
+                          WHERE b.hash = c.blob_hash
+                        ),
+                        quota AS (
+                          UPDATE users SET
+                            used_bytes = used_bytes - (SELECT coalesce(sum(size), 0) FROM del),
+                            reserved_bytes = greatest(reserved_bytes - (SELECT coalesce(sum(size), 0) FROM cancelled), 0)
+                          WHERE id = :owner
+                        )
+                        SELECT count(*)::int FROM del""".formatted(roots))
+                .param("owner", ownerId);
+        if (trashRootIds != null) stmt = stmt.param("ids", trashRootIds.stream().map(UUID::toString).toArray(String[]::new));
+        return stmt.query(Integer.class).single();
+    }
 }
