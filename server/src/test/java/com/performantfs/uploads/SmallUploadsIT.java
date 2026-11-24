@@ -95,4 +95,21 @@ class SmallUploadsIT extends IntegrationTest {
         }
         assertThat(refcount(sha256(data))).isEqualTo(8);
     }
+
+    @Test
+    void reportsUsage() {
+        var dave = newUser();
+        byte[] data = random(2000);
+        dave.folder("docs");
+        dave.uploadSmall("a.bin", data);
+        dave.uploadSmall("b.bin", data);
+        JsonNode usage = dave.api().get("/api/stats").json();
+        assertThat(usage.path("fileBytes").asLong()).isEqualTo(4000);
+        assertThat(usage.path("trashBytes").asLong()).isZero();
+        assertThat(usage.path("usedBytes").asLong()).isEqualTo(4000);
+        assertThat(usage.path("reservedBytes").asLong()).isZero();
+        assertThat(usage.path("fileCount").asInt()).isEqualTo(2);
+        assertThat(usage.path("folderCount").asInt()).isEqualTo(1);
+        assertThat(usage.path("dedupSavedBytes").asLong()).isGreaterThanOrEqualTo(2000);
+    }
 }
