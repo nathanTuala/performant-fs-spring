@@ -1,5 +1,7 @@
 package com.performantfs.support;
 
+import java.util.Map;
+import java.util.UUID;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
@@ -20,4 +22,17 @@ public abstract class IntegrationTest {
     protected ApiClient anonymous() {
         return new ApiClient("http://localhost:" + port);
     }
+
+    /** A freshly registered, signed-in user. */
+    protected TestUser newUser() {
+        ApiClient client = anonymous();
+        var res = client.post("/api/auth/register",
+                Map.of("email", "u" + UUID.randomUUID() + "@test.dev", "password", "correct horse battery"));
+        if (res.status() != 201) throw new IllegalStateException("register failed: " + res.status() + " " + res.text());
+        var body = res.json();
+        return new TestUser(client, UUID.fromString(body.path("id").asString()), UUID.fromString(body.path("rootId").asString()));
+    }
+
+    /** A signed-in client plus the ids tests usually need. */
+    public record TestUser(ApiClient api, UUID id, UUID rootId) {}
 }

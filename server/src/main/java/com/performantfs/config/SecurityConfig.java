@@ -9,6 +9,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.factory.PasswordEncoderFactories;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
@@ -41,6 +43,15 @@ public class SecurityConfig {
                         .anyRequest().permitAll()) // the web app's static files
                 .exceptionHandling(e -> e.authenticationEntryPoint(jsonUnauthorized))
                 .build();
+    }
+
+    /**
+     * Spring's delegating encoder: bcrypt today, stored as {bcrypt}..., so the algorithm can be
+     * raised later and old hashes still verify.
+     */
+    @Bean
+    PasswordEncoder passwordEncoder() {
+        return PasswordEncoderFactories.createDelegatingPasswordEncoder();
     }
 
     /** 401s use the same {error: {code, message}} shape as every other failure. */
