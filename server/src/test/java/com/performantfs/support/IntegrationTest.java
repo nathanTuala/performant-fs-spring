@@ -74,6 +74,17 @@ public abstract class IntegrationTest {
             return folder(name, rootId);
         }
 
+        /** Single-request upload; returns the created node. */
+        public tools.jackson.databind.JsonNode uploadSmall(String name, byte[] bytes, UUID parentId) {
+            var res = api.post("/api/files?parentId=" + parentId + "&name=" + java.net.URLEncoder.encode(name, java.nio.charset.StandardCharsets.UTF_8), bytes);
+            if (res.status() != 201) throw new IllegalStateException("upload failed: " + res.status() + " " + res.text());
+            return res.json();
+        }
+
+        public tools.jackson.databind.JsonNode uploadSmall(String name, byte[] bytes) {
+            return uploadSmall(name, bytes, rootId);
+        }
+
         /** GET /api/nodes/{folder}/children with an optional query string (e.g. "?limit=4"). */
         public tools.jackson.databind.JsonNode children(UUID folderId, String query) {
             var res = api.get("/api/nodes/" + folderId + "/children" + query);
