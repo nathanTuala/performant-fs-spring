@@ -1,5 +1,7 @@
 package com.performantfs.config;
 
+import com.performantfs.auth.SessionCookieFilter;
+import com.performantfs.auth.SessionStore;
 import com.performantfs.http.ErrorBody;
 import com.performantfs.http.ErrorCode;
 import org.springframework.context.annotation.Bean;
@@ -9,11 +11,12 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Who may call what. Sessions are our own (an opaque cookie backed by the sessions table, added
- * with auth), so Spring's HTTP session, form login and basic auth are all off.
+ * Who may call what. Sessions are our own (an opaque cookie backed by the sessions table, read by
+ * {@link SessionCookieFilter}), so Spring's HTTP session, form login and basic auth are all off.
  *
  * <p>CSRF tokens are off: the session cookie is SameSite=Lax and every state-changing endpoint
  * takes JSON or a raw body, which a cross-site form cannot send with credentials.
@@ -22,8 +25,10 @@ import tools.jackson.databind.json.JsonMapper;
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain api(HttpSecurity http, AuthenticationEntryPoint jsonUnauthorized) throws Exception {
+    SecurityFilterChain api(HttpSecurity http, AuthenticationEntryPoint jsonUnauthorized, SessionStore sessions)
+            throws Exception {
         return http
+                .addFilterBefore(new SessionCookieFilter(sessions), AnonymousAuthenticationFilter.class)
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .formLogin(f -> f.disable())
