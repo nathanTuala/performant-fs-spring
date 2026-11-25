@@ -148,4 +148,42 @@ class ContentIndexIT extends IntegrationTest {
         db.sql("DELETE FROM blobs WHERE hash = ?").param(sha256(text)).update();
         assertThat(row(sha256(text))).isNull();
     }
+
+    private int passages(String hash) {
+        return db.sql("SELECT count(*) FROM blob_chunks WHERE hash = ?").param(hash).query(Integer.class).single();
+    }
+
+    @Test
+    void storesAnEmbeddedPassageForEachPartOfTheText() {
+        var alice = newUser();
+        byte[] text = utf8(("passage words " + UUID.randomUUID() + " ").repeat(150)); // ~450 words
+        alice.uploadSmall("long.md", text);
+        indexed(text);
+        assertThat(passages(sha256(text))).isBetween(4, 6);
+        double norm = db.sql("SELECT vector_norm(embedding) FROM blob_chunks WHERE hash = ? AND seq = 0")
+                .param(sha256(text)).query(Double.class).single();
+        assertThat(norm).isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-4));
+    }
+
+    @Test
+    void storesNoPassagesForFilesWithoutText() {
+        var alice = newUser();
+        byte[] binary = new byte[512];
+        binary[1] = (byte) UUID.randomUUID().hashCode();
+        alice.uploadSmall("blank.bin", binary);
+        indexed(binary);
+        assertThat(passages(sha256(binary))).isZero();
+    }
+
+    @Test
+    void replacesPassagesWhenAFileIsReindexed() {
+        var alice = newUser();
+        byte[] text = utf8("reindex me " + UUID.randomUUID());
+        alice.uploadSmall("again.txt", text);
+        indexed(text);
+        db.sql("UPDATE blob_text SET status = 'pending', claimed_at = NULL, attempts = 0 WHERE hash = ?").param(sha256(text)).update();
+        indexer.wake();
+        indexed(text);
+        assertThat(passages(sha256(text))).isEqualTo(1);
+    }
 }

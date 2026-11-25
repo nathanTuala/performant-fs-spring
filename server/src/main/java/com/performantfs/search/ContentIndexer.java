@@ -1,6 +1,8 @@
 package com.performantfs.search;
 
 import com.performantfs.blobs.BlobStore;
+import com.performantfs.embedding.Embedder;
+import com.performantfs.embedding.Passages;
 import com.performantfs.search.TextExtractor.Result;
 import com.performantfs.uploads.FileStored;
 import jakarta.annotation.PreDestroy;
@@ -21,6 +23,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Works through the blob_text queue in the background, one file at a time, so a burst of
@@ -30,6 +33,9 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * instances take other rows), then extracted with no transaction or lock open: an upload of the
  * same bytes, or garbage collection, never waits on a slow PDF. A worker that dies leaves a stale
  * stamp, and the row is retried later; a file that keeps killing workers is given up on.
+ *
+ * <p>Text is also split into passages and embedded for semantic search; the text and its
+ * passages are saved in one transaction, so a file never has one without the other.
  */
 @Component
 public class ContentIndexer {
@@ -42,15 +48,19 @@ public class ContentIndexer {
 
     private final JdbcClient db;
     private final BlobStore blobs;
+    private final Embedder embedder;
+    private final TransactionTemplate tx;
     private final TextExtractor extractor = new TextExtractor(TextExtractor.Limits.DEFAULT);
     private final ExecutorService worker =
             Executors.newSingleThreadExecutor(Thread.ofVirtual().name("content-indexer").factory());
     /** True while a drain is queued but not started: wakes in between fold into it. */
     private final AtomicBoolean queued = new AtomicBoolean();
 
-    ContentIndexer(JdbcClient db, BlobStore blobs) {
+    ContentIndexer(JdbcClient db, BlobStore blobs, Embedder embedder, TransactionTemplate tx) {
         this.db = db;
         this.blobs = blobs;
+        this.embedder = embedder;
+        this.tx = tx;
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -130,16 +140,31 @@ public class ContentIndexer {
                 result = new Result.Failed("could not read the blob: " + e.getMessage());
             }
         }
+        List<String> passages = List.of();
+        float[][] vectors = new float[0][];
+        if (result instanceof Result.Text t) {
+            try {
+                passages = Passages.DEFAULT.split(t.text());
+                vectors = embedder.embed(passages);
+            } catch (RuntimeException e) {
+                log.warn("could not embed {}", claim.hash(), e);
+                result = new Result.Failed("could not embed the text");
+                passages = List.of();
+            }
+        }
         try {
-            save(claim.hash(), result);
+            save(claim.hash(), result, passages, vectors);
         } catch (DataAccessException e) {
             log.warn("could not store the text of {}", claim.hash(), e);
-            save(claim.hash(), new Result.Failed("could not store the text"));
+            save(claim.hash(), new Result.Failed("could not store the text"), List.of(), new float[0][]);
         }
     }
 
-    /** Records the outcome. If garbage collection deleted the blob meanwhile, there's no row left to update. */
-    private void save(String hash, Result result) {
+    /**
+     * Records the outcome and replaces the file's passages, in one transaction. If garbage
+     * collection deleted the blob meanwhile, there's no row left to update and nothing is written.
+     */
+    private void save(String hash, Result result, List<String> passages, float[][] vectors) {
         String status = switch (result) {
             case Result.Text t -> "indexed";
             case Result.Unsupported u -> "unsupported";
@@ -148,12 +173,31 @@ public class ContentIndexer {
                 yield "failed";
             }
         };
-        db.sql("""
-                        UPDATE blob_text SET status = :status, content = :content, claimed_at = NULL, updated_at = now()
-                        WHERE hash = :hash AND status = 'pending'""")
-                .param("status", status)
-                .param("content", result instanceof Result.Text t ? t.text() : null)
-                .param("hash", hash)
-                .update();
+        tx.executeWithoutResult(s -> {
+            int updated = db.sql("""
+                            UPDATE blob_text SET status = :status, content = :content, claimed_at = NULL, updated_at = now()
+                            WHERE hash = :hash AND status = 'pending'""")
+                    .param("status", status)
+                    .param("content", result instanceof Result.Text t ? t.text() : null)
+                    .param("hash", hash)
+                    .update();
+            if (updated == 0) return;
+            db.sql("DELETE FROM blob_chunks WHERE hash = ?").param(hash).update();
+            for (int i = 0; i < passages.size(); i++) {
+                db.sql("INSERT INTO blob_chunks (hash, seq, text, embedding) VALUES (?, ?, ?, CAST(? AS vector))")
+                        .params(hash, i, passages.get(i), vectorLiteral(vectors[i]))
+                        .update();
+            }
+        });
+    }
+
+    /** pgvector's text form, "[0.1,-0.2,…]": no driver extension needed. */
+    static String vectorLiteral(float[] v) {
+        var sb = new StringBuilder(v.length * 12).append('[');
+        for (int i = 0; i < v.length; i++) {
+            if (i > 0) sb.append(',');
+            sb.append(v[i]);
+        }
+        return sb.append(']').toString();
     }
 }
