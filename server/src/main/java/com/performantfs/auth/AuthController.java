@@ -66,6 +66,15 @@ class AuthController {
         return signedIn(HttpStatus.OK, user);
     }
 
+    /** Public demo credentials, so the sign-in page can offer them; 404 when there's no demo account. */
+    record DemoCredentials(String email, String password) {}
+
+    @GetMapping("/demo")
+    DemoCredentials demo() {
+        if (props.demoEmail().isBlank() || props.demoPassword().isBlank()) throw ApiException.notFound("Demo account");
+        return new DemoCredentials(props.demoEmail(), props.demoPassword());
+    }
+
     @PostMapping("/logout")
     ResponseEntity<Void> logout(HttpServletRequest request) {
         SessionCookieFilter.tokenFrom(request).ifPresent(sessions::delete);

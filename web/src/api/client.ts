@@ -52,6 +52,7 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
 
 export const api = {
   me: () => request<User>('GET', '/auth/me'),
+  demoCredentials: () => request<{ email: string; password: string }>('GET', '/auth/demo'),
   login: (email: string, password: string) => request<User>('POST', '/auth/login', { email, password }),
   register: (email: string, password: string) => request<User>('POST', '/auth/register', { email, password }),
   logout: () => request<void>('POST', '/auth/logout'),
