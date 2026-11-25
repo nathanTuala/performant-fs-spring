@@ -46,4 +46,18 @@ public final class MimeTypes {
         if (claimed != null && WELL_FORMED.matcher(claimed).matches()) return claimed.toLowerCase(Locale.ROOT);
         return "application/octet-stream";
     }
+
+    /**
+     * Types the browser may render inline from our origin. Anything that can run script (HTML,
+     * SVG, XML) is excluded: it is served as an attachment, or as text/plain for previews.
+     */
+    public static boolean isSafeInline(String mime) {
+        if (mime.equals("image/svg+xml")) return false;
+        return mime.startsWith("image/") || mime.startsWith("video/") || mime.startsWith("audio/") || mime.equals("application/pdf");
+    }
+
+    public static boolean isTextLike(String mime) {
+        return mime.startsWith("text/") || mime.equals("application/json") || mime.equals("application/xml")
+                || mime.equals("image/svg+xml");
+    }
 }
