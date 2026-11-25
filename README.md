@@ -3,9 +3,9 @@
 A hosted file system in the spirit of Google Drive:
 - **Files:** upload files and whole folder trees (drag-and-drop or picker), with large uploads resuming after a dropped connection.
 - **Organising:** move by drag-and-drop with undo, rename, expand folders in place, trash and restore.
-- **Finding and downloading:** search names and the text inside files as you type, and download with resumable Range requests.
+- **Finding and downloading:** search names and the text inside files as you type, find files by meaning even when no words match, and download with resumable Range requests.
 
-**Stack:** Java 25, Spring Boot 4.2 (MVC, Security, JDBC, Flyway) and PostgreSQL 16 for metadata, a content-addressed blob store on disk, and a React + Vite web app.
+**Stack:** Java 25, Spring Boot 4.2 (MVC, Security, JDBC, Flyway) and PostgreSQL 16 with pgvector for metadata and search, a content-addressed blob store on disk, and a React + Vite web app.
 
 ## Run it
 
@@ -17,7 +17,7 @@ Development:
 
 ```bash
 docker compose up -d db              # Postgres on localhost:5434
-cd server && ./gradlew bootRun       # API on :8090 (downloads Java 25 on first run)
+cd server && ./gradlew bootRun       # API on :8090 (downloads Java 25 and the 90 MB embedding model on first run)
 cd web && npm install && npm run dev # UI on :5173, proxies /api to :8090
 cd server && ./gradlew test          # unit + integration tests against a real Postgres (Testcontainers)
 ```
@@ -59,6 +59,12 @@ Files up to 8 MB use `POST /api/files`, which hashes while streaming. Neither pa
 - *A background worker* (`ContentIndexer`) is woken after each upload commits, with a 30 s poll as backup. It claims rows with a short `SKIP LOCKED` statement and extracts with no lock held, so a slow PDF never blocks an upload or garbage collection. A crashed worker's claim is retried; a file that fails three times is marked `failed`.
 - *Files are untrusted*, so extraction is capped: 64 MB per PDF, 1,000 pages, 500,000 characters kept, 20 s.
 - *Querying:* every word must be in the name, or every word in the contents. The two are separate index lookups, unioned, so both stay indexed. Name matches rank first. Results found by contents carry a snippet built from a ~300-character window around the first match, for the returned page only. Highlights are character ranges, never markup.
+
+**Semantic search** finds files by meaning: "what if my internet cuts out while sending a big file" finds the design doc's section on resumable uploads, though they share no words.
+- *Model:* all-MiniLM-L6-v2 (384 dimensions), run in-process with ONNX Runtime on the CPU. No API key, no cost, and file contents never leave the server. `./gradlew downloadModel` fetches it and checks a pinned SHA-256. The WordPiece tokenizer is ours, tested id-for-id against Hugging Face's.
+- *Indexing:* the same background worker splits each file's text into 120-word passages overlapping by 30 (at most 100 per file) and embeds them. Passages go into `blob_chunks` (pgvector, HNSW cosine index), keyed by blob like the text, and are saved in the same transaction as the text.
+- *Querying:* the query is embedded (a few ms) and matched to the nearest passages. The scan keeps only the searcher's own live files, and pgvector's iterative scan keeps going so that filter can't starve the results. The same `type:` / `size:` / `modified:` / `in:` filters apply. A file counts as related when its best passage is within cosine distance 0.65, a cut measured on real files: on-topic queries scored 0.50–0.63, unrelated ones 0.72 and up.
+- *Results:* keyword results stay exact and paginated. The first page also carries up to 8 files **related by meaning** that keyword search didn't already find, each with the passage that matched. They're a separate group, not blended into the ranking, so it's always clear why a file is there.
 
 **Data access** uses Spring's `JdbcClient` with plain SQL and Flyway migrations, not JPA. The tree relies on recursive CTEs, keyset row comparisons, partial unique indexes with `ON CONFLICT`, data-modifying CTEs and advisory locks, all first-class in SQL and awkward in an ORM.
 
@@ -106,6 +112,9 @@ Rule from Grand Charter: high-level libraries that ship file-management function
 | --- | --- |
 | Spring Boot (Web MVC, Security, JDBC, Validation) | HTTP framework, auth plumbing, database access, request validation |
 | Flyway | Database migrations |
+| ONNX Runtime | Runs the embedding model for semantic search on the CPU. Passages, storage, querying and the tokenizer are ours. |
+| all-MiniLM-L6-v2 (model weights, Apache 2.0) | Embeds text for semantic search |
+| pgvector (Postgres extension) | Vector column and nearest-neighbour index |
 | Apache PDFBox | Reads the text out of PDFs for content search. A parser for one format; indexing, queueing and querying are ours. |
 | PostgreSQL JDBC driver | Database driver |
 | Testcontainers, JUnit 5, AssertJ | Tests against a real Postgres |
@@ -117,9 +126,10 @@ Everything that does file-system work is written in this repo:
 - Range and ETag handling (by hand, not Spring's `ResourceRegion`)
 - tree operations and cycle checks
 - content indexing: the queue, format detection, limits, snippets
+- semantic search: tokenizer, passage splitting, pooling, the owner-filtered vector query
 - the folder-drop walker and the virtual list in the web app
 
 ## Status
 
-- **Done:** auth, uploads (chunked, resumable, parallel, single-request, folder trees), listing, move/rename/bulk move with undo, trash and restore, downloads with Range, quota, background maintenance, web app, Docker image, search by name (as-you-type, prefixes, typos, filters, `in:` scope), content search inside PDFs and text files with snippets.
-- **Next:** semantic search with pgvector (find files by meaning, combined with keyword search). Office documents (Word, Excel, PowerPoint) could be added to content search with Apache POI.
+- **Done:** auth, uploads (chunked, resumable, parallel, single-request, folder trees), listing, move/rename/bulk move with undo, trash and restore, downloads with Range, quota, background maintenance, web app, Docker image, search by name (as-you-type, prefixes, typos, filters, `in:` scope), content search inside PDFs and text files with snippets, semantic search (related by meaning).
+- **Next:** resuming uploads after a page reload. Office documents (Word, Excel, PowerPoint) could be added to content search with Apache POI.
