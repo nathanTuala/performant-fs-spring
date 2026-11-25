@@ -235,6 +235,10 @@ button, input { font: inherit; color: inherit; }
 .result-main .result-name { align-self: flex-start; max-width: 100%; }
 .snippet { margin: 0; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .snippet mark { background: var(--accent-soft); color: var(--text); font-weight: 600; border-radius: 2px; padding: 0 1px; }
+/* Search results aren't a virtual list: each list is as tall as its rows, and the page scrolls
+   as a whole, so related results follow straight after the keyword results. */
+.search-page { overflow-y: auto; }
+.search-page .rows { flex: none; overflow: visible; }
 .related { border-top: 1px solid var(--border); margin-top: 8px; }
 .related-heading { margin: 0; padding: 14px 20px 6px; font-weight: 600; }
 .result-name { border: 0; background: none; padding: 0; cursor: pointer; text-align: left; }

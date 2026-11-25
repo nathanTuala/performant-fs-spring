@@ -74,7 +74,7 @@ export function SearchView({ q }: { q: string }) {
           <h1 className="crumb current">{q.trim() ? <>Results for <q>{q}</q></> : 'Search'}</h1>
         </nav>
       </header>
-      <div className={`file-list${loading ? ' is-loading' : ''}`} aria-busy={loading}>
+      <div className={`file-list search-page${loading ? ' is-loading' : ''}`} aria-busy={loading}>
         <div className="search-progress" aria-hidden="true" />
         {error && <p className="search-error" role="alert">{error}</p>}
         {!error && q.trim() && settled && items.length === 0 && (
