@@ -39,6 +39,16 @@ class SmallUploadsIT extends IntegrationTest {
     }
 
     @Test
+    void queuesStoredBytesForContentIndexingOnce() {
+        var alice = newUser();
+        byte[] data = utf8("indexed once " + UUID.randomUUID());
+        alice.uploadSmall("a.txt", data);
+        alice.uploadSmall("b.txt", data);
+        int rows = db.sql("SELECT count(*) FROM blob_text WHERE hash = ?").param(sha256(data)).query(Integer.class).single();
+        assertThat(rows).isEqualTo(1);
+    }
+
+    @Test
     void givesATakenNameANumberInsteadOfOverwriting() {
         var alice = newUser();
         UUID photos = alice.folder("photos");

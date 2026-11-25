@@ -101,6 +101,8 @@ public class UploadService {
                         ON CONFLICT (hash) DO UPDATE SET refcount = blobs.refcount + 1""")
                 .params(in.hash(), in.size())
                 .update();
+        // Queue the bytes for content indexing; already-known bytes keep their row and its text.
+        db.sql("INSERT INTO blob_text (hash) VALUES (?) ON CONFLICT DO NOTHING").param(in.hash()).update();
         nodes.getLiveFolder(in.ownerId(), in.parentId(), false);
         NodeRow node = nodes.insert(
                 new NewNode(in.ownerId(), in.parentId(), false, in.name(), in.size(), in.mime(), in.hash()),
