@@ -21,3 +21,6 @@ dist/
 *.log
 .env
 .DS_Store
+
+# Downloaded by ./gradlew downloadModel
+server/models/
