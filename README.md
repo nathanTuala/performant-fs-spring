@@ -86,6 +86,44 @@ Background maintenance (`maintenance/`, every minute) does the following; each s
 - purges trash older than 30 days
 - garbage-collects unreferenced blobs
 
+## Observability
+
+Every request is traced with OpenTelemetry (Spring Boot's starter), and the trace id comes back in an `X-Trace-Id` header. Nothing is exported unless you turn it on, so the app runs fine without a collector.
+
+```bash
+docker compose --profile observability up -d lgtm   # Grafana + Prometheus + Tempo + Loki (2.6 GB image, dev only)
+cd server && SPRING_PROFILES_ACTIVE=otel ./gradlew bootRun
+open http://localhost:3001                          # Dashboards → Performant FS
+```
+
+**Look up a search you just made.** Take the `X-Trace-Id` from the browser's network tab and paste it into Grafana → Explore → Tempo. Or search by what was typed, with TraceQL `{ span.query = "energy transformation" }`. Or click a row in the dashboard's *Recent searches* table. The trace shows each stage with its time and what it returned:
+
+```
+http get /api/search          19 ms
+├─ pfs.search.keyword          5 ms   query="how do plants make food" results=0
+└─ pfs.search.semantic        11 ms   results=1 result.ids=90d8…
+   ├─ pfs.search.embed         5 ms
+   └─ pfs.search.vector        4 ms   distances=90d8…=0.239
+```
+
+**The dashboard** shows:
+- searches per minute, and p95 latency per stage (keyword, semantic, query embedding, vector query);
+- requests, p95 latency and errors per endpoint;
+- uploads (single or chunked, deduplicated or new), bytes uploaded, storage after deduplication;
+- the indexing queue, files indexed by outcome, and indexing time;
+- recent search traces and the logs.
+
+**Logs** carry the trace id and go to Loki with the `otel` profile:
+- one access line per API request: method, path, status, time, user;
+- file stored, items moved, trashed, restored or deleted forever;
+- failed sign-ins;
+- maintenance runs;
+- a startup line with the configuration.
+
+The compose app logs JSON (ECS). Logs never include file names, emails or the query string. Search text goes on traces only where `pfs.trace-search-text=true`, which is set in `application.properties` for development and off by default.
+
+**Metrics** are pushed over OTLP every 10 s, not scraped, so the only actuator endpoint is `/actuator/health`. Metric tags hold bounded values only (page, filters, path, status). Ids and text stay on traces.
+
 ## Security
 
 - **Sign-in switch:** `pfs.sign-in-required` defaults to `true` in code, so a deployment is never open by accident. Only `application.properties` turns it off for now.
@@ -115,6 +153,9 @@ Rule from Grand Charter: high-level libraries that ship file-management function
 | ONNX Runtime | Runs the embedding model for semantic search on the CPU. Passages, storage, querying and the tokenizer are ours. |
 | bge-small-en-v1.5 (model weights, MIT) | Embeds text for semantic search |
 | pgvector (Postgres extension) | Vector column and nearest-neighbour index |
+| Spring Boot Actuator, OpenTelemetry starter | Traces, metrics and log export over OTLP |
+| OpenTelemetry Logback appender | Sends log lines to the OTLP log exporter |
+| grafana/otel-lgtm (Docker image, development only) | Collector, Prometheus, Tempo, Loki and Grafana in one container |
 | Apache PDFBox | Reads the text out of PDFs for content search. A parser for one format; indexing, queueing and querying are ours. |
 | PostgreSQL JDBC driver | Database driver |
 | Testcontainers, JUnit 5, AssertJ | Tests against a real Postgres |
