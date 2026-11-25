@@ -5,6 +5,8 @@ import static com.performantfs.support.Bytes.utf8;
 import static com.performantfs.support.Eventually.eventually;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.performantfs.blobs.BlobStore;
+import com.performantfs.support.Chunks;
 import com.performantfs.support.IntegrationTest;
 import com.performantfs.support.Pdfs;
 import java.util.UUID;
@@ -16,6 +18,7 @@ class ContentIndexIT extends IntegrationTest {
 
     @Autowired JdbcClient db;
     @Autowired ContentIndexer indexer;
+    @Autowired BlobStore blobs;
 
     record Row(String status, String content, int attempts) {}
 
@@ -104,5 +107,45 @@ class ContentIndexIT extends IntegrationTest {
         Row row = row(sha256(text));
         assertThat(row.status()).isEqualTo("indexed");
         assertThat(row.attempts()).isEqualTo(1);
+    }
+
+    @Test
+    void indexesFilesThatArrivedInChunks() {
+        var alice = newUser();
+        // Over the 1 MB test chunk size, so this goes through the resumable protocol.
+        String marker = "chunkyword" + UUID.randomUUID().toString().replace("-", "");
+        byte[] text = utf8(marker + " " + "lorem ipsum dolor sit amet ".repeat(100_000));
+        Chunks.upload(alice, "big.txt", text, alice.rootId());
+        Row row = indexed(text);
+        assertThat(row.status()).isEqualTo("indexed");
+        assertThat(row.content()).startsWith(marker);
+    }
+
+    @Test
+    void marksAFileWhoseBytesAreMissingAsFailedAndCarriesOn() throws Exception {
+        var alice = newUser();
+        byte[] lost = utf8("lost on disk " + UUID.randomUUID());
+        byte[] fine = utf8("still fine " + UUID.randomUUID());
+        alice.uploadSmall("lost.txt", lost);
+        indexed(lost);
+        blobs.deleteBlob(sha256(lost));
+        db.sql("UPDATE blob_text SET status = 'pending', content = NULL, claimed_at = NULL, attempts = 0 WHERE hash = ?")
+                .param(sha256(lost))
+                .update();
+        alice.uploadSmall("fine.txt", fine);
+        assertThat(indexed(lost).status()).isEqualTo("failed");
+        assertThat(indexed(fine).status()).isEqualTo("indexed");
+    }
+
+    @Test
+    void forgetsTheTextWhenGarbageCollectionDeletesTheBlob() {
+        var alice = newUser();
+        byte[] text = utf8("short-lived " + UUID.randomUUID());
+        alice.uploadSmall("tmp.txt", text);
+        indexed(text);
+        db.sql("UPDATE blobs SET refcount = 0 WHERE hash = ?").param(sha256(text)).update();
+        db.sql("DELETE FROM nodes WHERE blob_hash = ?").param(sha256(text)).update();
+        db.sql("DELETE FROM blobs WHERE hash = ?").param(sha256(text)).update();
+        assertThat(row(sha256(text))).isNull();
     }
 }
