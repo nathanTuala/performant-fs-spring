@@ -1,11 +1,29 @@
-# Performant Filesystem (Spring Boot)
+# Performant Filesystem
 
-A hosted file system in the spirit of Google Drive:
+A Google Drive-like file system built for the Grand Charter take-home: a Java/Spring Boot backend, PostgreSQL, a content-addressed blob store, and a React web app.
+
+What it does:
 - **Files:** upload files and whole folder trees (drag-and-drop or picker), with large uploads resuming after a dropped connection.
 - **Organising:** move by drag-and-drop with undo, rename, expand folders in place, trash and restore.
 - **Finding and downloading:** search names and the text inside files as you type, find files by meaning even when no words match, and download with resumable Range requests.
 
 **Stack:** Java 25, Spring Boot 4.2 (MVC, Security, JDBC, Flyway) and PostgreSQL 16 with pgvector for metadata and search, a content-addressed blob store on disk, and a React + Vite web app.
+
+## Design decisions at a glance
+
+| Decision | Why | Trade-off accepted |
+| --- | --- | --- |
+| **Metadata in Postgres, bytes on disk by SHA-256** | Moves and renames are one-row updates whatever the folder size; identical bytes are stored once; downloads can be cached forever because a hash never changes | Bytes on one server's disk. `BlobStore` is an interface, so S3 could replace it without touching the protocol |
+| **Own chunked, resumable upload protocol** (no tus/Uppy, per the brief) | Parallel, out-of-order and resumable 8 MB chunks, each verified by checksum; quota reserved up front so parallel uploads can't overshoot | More code to own, covered by integration tests (corruption, resume, races) |
+| **Plain SQL with `JdbcClient`, not JPA** | The hard parts are SQL features: recursive CTEs, keyset pagination, `ON CONFLICT`, advisory locks, `SKIP LOCKED` | No entity mapping; queries are written by hand |
+| **Keyset pagination and a virtualised list** | A 100k-file folder lists in about 5 ms per page, and the browser renders about 33 rows whatever the size | No "jump to page 37" |
+| **Correctness under concurrency first** | A file system must never lose or duplicate files: crossing moves, parallel uploads of the same bytes and GC are all guarded (table below) | Per-user locks serialise a single user's structural changes |
+| **Search in three layers**: names (prefix and typo-tolerant), contents (PDF and text), meaning (embeddings) | Each answers a different question; keyword results stay exact and paginated, and "related by meaning" is a separate, labelled group, so it's always clear why a file appears | Office files and EPUB aren't read yet |
+| **Embedding model runs in-process** (bge-small via ONNX Runtime) | No API key or cost, works offline, and file contents never leave the server. Chosen by measurement: the first model (MiniLM) couldn't separate related from unrelated files | Smaller model than hosted APIs; the 0.42 cut-off was tuned on a small sample |
+| **Indexing in the background, queued in the upload's own transaction** | Uploads never wait for PDF parsing; a crash can't lose a queued file; identical files are read once | Search inside a new file lags its upload by a second or two |
+| **HTTP caching, no Redis** | Downloads already get ETag and `immutable` caching; hot queries are single-digit milliseconds on indexes. A server cache would add invalidation bugs to moves, trash and undo | Usage stats are computed per request; running totals would be the next step at scale |
+| **OpenTelemetry for observability** | The industry standard: traces show each search stage and what it returned, the dashboard shows system health, logs carry trace ids. Export is off unless enabled | The Grafana image is large (2.6 GB, development only) |
+| **Sign-in switched off for the demo** | Opens straight to the files. Accounts, sessions and per-user isolation are intact and tested; one setting turns sign-in back on | Everyone shares one local account while it's off |
 
 ## Run it
 
@@ -170,7 +188,64 @@ Everything that does file-system work is written in this repo:
 - semantic search: tokenizer, passage splitting, pooling, the owner-filtered vector query
 - the folder-drop walker and the virtual list in the web app
 
+## Known limits
+
+| Limit | Value |
+| --- | --- |
+| Largest file / storage per account | 10 GB / 2 GB (`pfs.max-file-size`, `pfs.default-quota`) |
+| Upload resume | Survives dropped connections, not a page reload (the browser loses the file handles) |
+| Plays in the browser | mp4/webm video, common audio and images, PDF. mkv and HEIC download instead (browser limits) |
+| Searchable inside | PDFs and UTF-8 text. Keyword: first 1,000 pages or 500k characters. By meaning: first ~9,000 words. Scanned PDFs need OCR (not built) |
+| Storage | One server's disk; nothing stops the disk itself from filling |
+
 ## Status
 
-- **Done:** auth, uploads (chunked, resumable, parallel, single-request, folder trees), listing, move/rename/bulk move with undo, trash and restore, downloads with Range, quota, background maintenance, web app, Docker image, search by name (as-you-type, prefixes, typos, filters, `in:` scope), content search inside PDFs and text files with snippets, semantic search (related by meaning).
-- **Next:** resuming uploads after a page reload. Office documents (Word, Excel, PowerPoint) could be added to content search with Apache POI.
+- **Done:** auth, uploads (chunked, resumable, parallel, single-request, folder trees), listing, move/rename/bulk move with undo, trash and restore, downloads with Range, quota, background maintenance, web app, Docker image, search by name (as-you-type, prefixes, typos, filters, `in:` scope), content search inside PDFs and text files with snippets, semantic search (related by meaning), observability (traces, metrics, logs, Grafana dashboard).
+- **Next:** resuming uploads after a page reload, running totals for usage stats. Office documents (Word, Excel, PowerPoint) could be added to content search with Apache POI.
+
+## How it was built
+
+Built in 18 small pull requests, each with focused commits and green CI, so the history reads as a story ([all PRs](https://github.com/nathanTuala/performant-fs-spring/pulls?q=is%3Apr)):
+
+| PRs | What |
+| --- | --- |
+| #1–#4 | Scaffold, schema and security baseline, auth, folders and listing |
+| #5–#7 | Blob store and deduplication, downloads with Range, chunked resumable uploads |
+| #8–#9 | Move, rename, trash, restore; background maintenance |
+| #10–#11 | React web app; serving it, Docker image |
+| #12–#13 | Search as you type; content search inside PDFs and text files |
+| #14 | Sign-in switch (off for the demo) |
+| #15 | Semantic search (local model + pgvector) |
+| #16 | Drag items out of an expanded folder |
+| #17 | Observability: OpenTelemetry + Grafana |
+| #18 | This README |
+
+## How I used AI tools
+
+I built this with **Claude Code** (Anthropic's coding agent) as a pair programmer. Most code was typed by the agent; the direction, decisions and verification were mine.
+
+**What I decided and drove**
+- **Scope and stack.** A first version was written in Node/TypeScript. I switched it to **Java 25 and Spring Boot**, the stack I want to be evaluated on, and had it rebuilt as this repo in small PRs.
+- **Process.** I asked for small, focused commits and stacked PRs, so every change could be reviewed and followed.
+- **Interpreting the brief.** I asked what "search and query through the files" means, which led to searching file contents and then meaning, not just names. I checked that each library fits the "no premade file-management libraries" rule; PDFBox, ONNX Runtime and pgvector are parsers and infrastructure, and the file-system logic is ours.
+- **Product calls.** I chose a local embedding model over a hosted API (privacy, no keys), OpenTelemetry + Grafana for observability, Finder-style folders, and turning sign-in off for the demo.
+- **Testing it as a user, and reporting what was wrong.** Each of these was fixed with a regression test where it applies:
+  - the search view could trap you, with no way back to your files;
+  - the empty state showed syntax tips instead of a plain message;
+  - the usage figure ignored deletions;
+  - a file couldn't be dragged back out of an expanded folder;
+  - "energy transformation" didn't find notes on photosynthesis. That led to measuring two embedding models and switching to the one that separated related from unrelated files.
+
+**What the agent did**
+- Wrote the code, tests, migrations and PR descriptions, in small commits.
+- Researched options and trade-offs on request: Tika vs PDFBox, embedding models, caching, observability tooling.
+- Measured instead of guessing:
+  - search latency on a 100k-file folder;
+  - query-to-passage distances for the two embedding models;
+  - p95 latencies in Grafana.
+
+**How the output was checked**
+- **Every PR:** 220 unit and end-to-end tests (the real server, over HTTP, against a real Postgres), run on each commit and in CI.
+- **In a real browser:** each UI change was exercised with Playwright (drag and drop, live search, related results), and I tried the features myself.
+- **Correctness first:** the concurrency hazards in the table above each have a test that races real requests.
+- **Honest reporting:** the PR descriptions note what wasn't measured, such as content search at large scale.
