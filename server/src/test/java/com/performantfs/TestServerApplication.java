@@ -1,5 +1,6 @@
 package com.performantfs;
 
+import com.performantfs.support.TestcontainersConfiguration;
 import org.springframework.boot.SpringApplication;
 
 public class TestServerApplication {
