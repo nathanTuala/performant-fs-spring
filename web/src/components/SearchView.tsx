@@ -1,5 +1,5 @@
-import type { NodeWithPath } from '../api/types';
-import { useEffect, useRef, useState } from 'react';
+import type { SearchHit, Snippet } from '../api/types';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { api, isAbort } from '../api/client';
 import { formatBytes, formatDate } from '../lib/format';
 import { navigate } from '../lib/router';
@@ -8,7 +8,7 @@ import { Icon, iconFor } from './Icon';
 interface Results {
   /** The query these results answer; may lag behind `q` while a new search is running. */
   query: string;
-  items: NodeWithPath[];
+  items: SearchHit[];
   cursor: string | null;
   error: string | null;
 }
@@ -59,7 +59,7 @@ export function SearchView({ q }: { q: string }) {
   const { items, cursor, error } = results;
   const settled = !loading && results.query === q;
 
-  function open(node: NodeWithPath) {
+  function open(node: SearchHit) {
     if (node.kind === 'folder') navigate({ view: 'folder', id: node.id });
     else window.open(api.contentUrl(node.id), '_blank', 'noopener');
   }
@@ -80,12 +80,15 @@ export function SearchView({ q }: { q: string }) {
         {items.length > 0 && (
           <ul className="rows plain search-results" aria-label="Search results">
             {items.map((node) => (
-              <li key={node.id} className="row">
+              <li key={node.id} className={`row${node.snippet ? ' has-snippet' : ''}`}>
                 <div className="col name">
                   <Icon name={iconFor(node)} className={node.kind === 'folder' ? 'folder-icon' : 'file-icon'} />
-                  <button className="result-name ellipsis" onClick={() => open(node)} title={`Open ${node.name}`}>
-                    {node.name}
-                  </button>
+                  <div className="result-main">
+                    <button className="result-name ellipsis" onClick={() => open(node)} title={`Open ${node.name}`}>
+                      {node.name}
+                    </button>
+                    {node.snippet && <Excerpt snippet={node.snippet} />}
+                  </div>
                 </div>
                 <nav className="col location small muted ellipsis" aria-label={`Location of ${node.name}`}>
                   {node.path.map((crumb, i) => (
@@ -111,4 +114,17 @@ export function SearchView({ q }: { q: string }) {
       </div>
     </section>
   );
+}
+
+/** The words found inside the file, in context. React escapes the text; marks are added by range. */
+function Excerpt({ snippet }: { snippet: Snippet }) {
+  const parts: ReactNode[] = [];
+  let at = 0;
+  for (const { start, end } of snippet.highlights) {
+    if (start < at || end > snippet.text.length) continue; // overlapping or out of range: skip
+    parts.push(snippet.text.slice(at, start), <mark key={start}>{snippet.text.slice(start, end)}</mark>);
+    at = end;
+  }
+  parts.push(snippet.text.slice(at));
+  return <p className="snippet small muted" title="Found inside the file">{parts}</p>;
 }

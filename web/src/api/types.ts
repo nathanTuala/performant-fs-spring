@@ -27,6 +27,19 @@ export interface NodeWithPath extends NodeDto {
   path: Crumb[];
 }
 
+/** An excerpt of a file's text around a search match. */
+export interface Snippet {
+  /** Plain text from inside the file: render it as text, never as HTML. */
+  text: string;
+  /** Character ranges of `text` that matched the query. */
+  highlights: { start: number; end: number }[];
+}
+
+export interface SearchHit extends NodeWithPath {
+  /** Present when the query matched the file's contents. */
+  snippet?: Snippet;
+}
+
 export type SortKey = 'name' | 'size' | 'modified';
 export type SortDir = 'asc' | 'desc';
 
