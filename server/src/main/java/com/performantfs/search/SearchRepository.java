@@ -4,7 +4,6 @@ import com.performantfs.http.ApiException;
 import com.performantfs.nodes.Crumb;
 import com.performantfs.nodes.NodeRepository;
 import com.performantfs.nodes.NodeRow;
-import com.performantfs.nodes.NodeWithPath;
 import com.performantfs.nodes.Page;
 import com.performantfs.search.SearchQuery.Comparison;
 import com.performantfs.search.SearchQuery.DateFilter;
@@ -82,13 +81,14 @@ public class SearchRepository {
                 .collect(Collectors.joining(" & "));
     }
 
-    public Page<NodeWithPath> search(UUID ownerId, SearchQuery q, int limit, String rawCursor) {
+    public Page<SearchHit> search(UUID ownerId, SearchQuery q, int limit, String rawCursor) {
         Map<String, Object> params = new HashMap<>();
         params.put("owner", ownerId);
         List<String> where = new ArrayList<>(List.of("n.owner_id = :owner", "n.deleted_at IS NULL", "n.parent_id IS NOT NULL"));
         List<String> ctes = new ArrayList<>();
         String from = "nodes n";
         String score = "0";
+        String contentHit = "false";
 
         // What the words and phrases must match: the name, or (failing that) the file's contents.
         List<String> nameMatch = new ArrayList<>();
@@ -136,6 +136,7 @@ public class SearchRepository {
             // A name match always ranks above a contents-only match: rank(…, 32) is below 1.
             score = "CASE WHEN %s THEN 1 + %s ELSE 0 END + CASE WHEN %s THEN ts_rank(t.search, %s, 32) ELSE 0 END"
                     .formatted(names, nameScore, contents, String.join(" && ", contentQuery));
+            contentHit = "coalesce(" + contents + ", false)";
         } else if (!nameMatch.isEmpty()) {
             where.addAll(nameMatch);
             score = nameScore;
@@ -183,21 +184,21 @@ public class SearchRepository {
 
         String sql = """
                 %sSELECT * FROM (
-                  SELECT %s, (%s)::numeric(12, 6) AS score, n.updated_at::text AS updated_key
+                  SELECT %s, (%s)::numeric(12, 6) AS score, n.updated_at::text AS updated_key, %s AS content_hit
                   FROM %s
                   WHERE %s
                 ) m
                 %s
                 ORDER BY m.score DESC, m.updated_at DESC, m.id DESC
-                LIMIT :limit""".formatted(with, NodeRow.columns("n"), score, from, String.join(" AND ", where), after);
+                LIMIT :limit""".formatted(with, NodeRow.columns("n"), score, contentHit, from, String.join(" AND ", where), after);
 
-        record Hit(NodeRow node, String score, String updatedKey) {}
+        record Hit(NodeRow node, String score, String updatedKey, boolean contentHit) {}
         List<Hit> hits = tx.execute(status -> {
             // Scoped to this transaction, so it never leaks to another request on the same connection.
             db.sql("SELECT set_config('pg_trgm.word_similarity_threshold', :t, true)")
                     .param("t", String.valueOf(FUZZY_THRESHOLD)).query(String.class).single();
             return db.sql(sql).params(params)
-                    .query((rs, n) -> new Hit(NodeRow.MAPPER.mapRow(rs, n), rs.getString("score"), rs.getString("updated_key")))
+                    .query((rs, n) -> new Hit(NodeRow.MAPPER.mapRow(rs, n), rs.getString("score"), rs.getString("updated_key"), rs.getBoolean("content_hit")))
                     .list();
         });
 
@@ -209,7 +210,55 @@ public class SearchRepository {
             Hit last = page.getLast();
             next = encode(new Cursor(last.score(), last.updatedKey(), last.node().id()));
         }
-        return new Page<>(page.stream().map(h -> new NodeWithPath(h.node().toDto(), paths.get(h.node().id()))).toList(), next);
+        List<String> matchedHashes = page.stream().filter(Hit::contentHit).map(h -> h.node().blobHash()).distinct().toList();
+        Map<String, Snippet> snippets = matchedHashes.isEmpty()
+                ? Map.of()
+                : snippets(matchedHashes, String.join(" && ", contentQuery), snippetWords(q), params);
+        return new Page<>(page.stream()
+                .map(h -> new SearchHit(h.node().toDto(), paths.get(h.node().id()),
+                        h.contentHit() ? snippets.get(h.node().blobHash()) : null))
+                .toList(), next);
+    }
+
+    /** Characters of context kept on each side of the first match. */
+    private static final int SNIPPET_CONTEXT = 150;
+
+    /**
+     * One excerpt per file, for the page being returned only. ts_headline re-parses the text it
+     * is given, so it is handed a small window around the first matching word rather than the
+     * whole document (up to {@link TextExtractor.Limits#maxChars()} characters).
+     */
+    private Map<String, Snippet> snippets(List<String> hashes, String contentQuery, List<String> words,
+                                          Map<String, Object> queryParams) {
+        Map<String, Object> params = new HashMap<>(queryParams);
+        params.put("hashes", hashes.toArray(String[]::new));
+        // \m is "start of a word"; the words are letters and digits only, so nothing in them is special.
+        params.put("first", "\\m(" + String.join("|", words) + ")");
+        params.put("context", SNIPPET_CONTEXT);
+        params.put("opts", "MaxFragments=1, MaxWords=30, MinWords=12, StartSel=" + Snippet.START + ", StopSel=" + Snippet.STOP);
+        String sql = """
+                SELECT hash, ts_headline('simple', substr(content, w.start, 2 * :context), %s, :opts) AS marked,
+                       w.start > 1 AS cut_start, w.start + 2 * :context <= length(content) AS cut_end
+                FROM blob_text t,
+                     LATERAL (SELECT greatest(1, regexp_instr(t.content, :first, 1, 1, 0, 'i') - :context) AS start) w
+                WHERE t.hash = ANY(CAST(:hashes AS char(64)[]))""".formatted(contentQuery);
+        Map<String, Snippet> out = new HashMap<>();
+        db.sql(sql).params(params).query((rs, n) -> {
+            out.put(rs.getString("hash"), Snippet.parse(rs.getString("marked"), rs.getBoolean("cut_start"), rs.getBoolean("cut_end")));
+            return null;
+        }).list();
+        return out;
+    }
+
+    /** The words a snippet should be centred on: the query's words, then the words of its phrases. */
+    private static List<String> snippetWords(SearchQuery q) {
+        List<String> words = new ArrayList<>();
+        java.util.stream.Stream.concat(java.util.stream.Stream.of(q.text()), q.phrases().stream())
+                .flatMap(NOT_WORD::splitAsStream)
+                .filter(w -> !w.isEmpty())
+                .map(w -> w.toLowerCase(Locale.ROOT))
+                .forEach(words::add);
+        return words;
     }
 
     /** Day-granular: modified:&lt;2026-01-01 means before that day starts. */

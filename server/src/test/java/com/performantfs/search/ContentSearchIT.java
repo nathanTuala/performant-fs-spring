@@ -55,6 +55,33 @@ class ContentSearchIT extends IntegrationTest {
         assertThat(names(alice, "undecid")).as("prefixes work in contents too").containsExactly("hw5.pdf");
     }
 
+    private JsonNode first(String q) {
+        var res = alice.api().get("/api/search?q=" + URLEncoder.encode(q, StandardCharsets.UTF_8));
+        return res.json().path("items").get(0);
+    }
+
+    @Test
+    void showsAnExcerptAroundTheMatchWithTheWordsMarked() {
+        JsonNode snippet = first("halting").path("snippet");
+        String text = snippet.path("text").asString();
+        assertThat(text).contains("prove the halting problem is undecidable");
+        JsonNode span = snippet.path("highlights").get(0);
+        assertThat(text.substring(span.path("start").asInt(), span.path("end").asInt())).isEqualToIgnoringCase("halting");
+    }
+
+    @Test
+    void centresTheExcerptOnTheMatchInALongFile() {
+        String filler = "lorem ipsum dolor sit amet ".repeat(400);
+        upload(alice, "long.txt", utf8(filler + "the zanzibar clause " + filler), alice.rootId());
+        String text = first("zanzibar").path("snippet").path("text").asString();
+        assertThat(text).startsWith("…").endsWith("…").contains("zanzibar clause").hasSizeLessThan(400);
+    }
+
+    @Test
+    void leavesTheExcerptOutWhenOnlyTheNameMatched() {
+        assertThat(first("set").has("snippet")).isFalse();
+    }
+
     @Test
     void ranksNameMatchesAboveContentsMatches() {
         assertThat(names(alice, "problem")).containsExactly("problem set.txt", "hw5.pdf", "notes.md");
