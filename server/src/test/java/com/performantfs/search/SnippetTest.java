@@ -40,5 +40,6 @@ class SnippetTest {
         assertThat(Snippet.excerpt("the quick brown fox jumps over the lazy dog", 20).text()).isEqualTo("the quick brown fox…");
         // One long word: cut mid-word rather than return almost nothing.
         assertThat(Snippet.excerpt("a " + "x".repeat(50), 20).text()).isEqualTo("a " + "x".repeat(18) + "…");
+        assertThat(Snippet.excerpt(". 3. Resume the upload", 40).text()).isEqualTo("…3. Resume the upload");
     }
 }
