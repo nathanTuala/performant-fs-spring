@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     java
     id("org.springframework.boot") version "4.2.0"
@@ -27,6 +29,8 @@ dependencies {
     implementation("org.flywaydb:flyway-database-postgresql")
     // Reads the text out of PDFs for content search. Text and code files are read directly.
     implementation("org.apache.pdfbox:pdfbox:3.0.8")
+    // Runs the embedding model for semantic search, on the CPU, inside the app.
+    implementation("com.microsoft.onnxruntime:onnxruntime:1.32.0")
     runtimeOnly("org.postgresql:postgresql")
     testImplementation("org.springframework.boot:spring-boot-starter-flyway-test")
     testImplementation("org.springframework.boot:spring-boot-starter-jdbc-test")
@@ -41,6 +45,65 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+// The embedding model for semantic search (BAAI/bge-small-en-v1.5, MIT). Downloaded once and
+// checked against a pinned SHA-256, not committed: it is 133 MB.
+val modelDir = layout.projectDirectory.dir("models/bge-small-en-v1.5")
+val modelFiles = mapOf(
+    "model.onnx" to ("https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/onnx/model.onnx"
+        to "828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35"),
+    "vocab.txt" to ("https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/vocab.txt"
+        to "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"),
+)
+
+val downloadModel = tasks.register("downloadModel") {
+    description = "Downloads the semantic search embedding model into models/ (once)."
+    group = "build setup"
+    outputs.dir(modelDir)
+    outputs.upToDateWhen { modelFiles.all { (name, src) -> sha256(modelDir.file(name).asFile) == src.second } }
+    doLast {
+        modelDir.asFile.mkdirs()
+        for ((name, src) in modelFiles) {
+            val (url, expected) = src
+            val target = modelDir.file(name).asFile
+            if (sha256(target) == expected) continue
+            logger.lifecycle("Downloading $name")
+            val partial = File(target.path + ".part")
+            uri(url).toURL().openStream().use { input -> partial.outputStream().use { input.copyTo(it) } }
+            val actual = sha256(partial)
+            if (actual != expected) {
+                partial.delete()
+                throw GradleException("$name: expected sha256 $expected, got $actual")
+            }
+            partial.renameTo(target)
+        }
+    }
+}
+
+fun sha256(file: File): String? {
+    if (!file.isFile) return null
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+        val buffer = ByteArray(1 shl 16)
+        while (true) {
+            val n = input.read(buffer)
+            if (n < 0) break
+            digest.update(buffer, 0, n)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}
+
+// Tests and the dev server load the model. ONNX Runtime loads a native library, which
+// Java 25 asks to be allowed explicitly.
+tasks.withType<Test> {
+    dependsOn(downloadModel)
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
+    dependsOn(downloadModel)
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
 
 // One runnable jar with a fixed name, for the Docker image.

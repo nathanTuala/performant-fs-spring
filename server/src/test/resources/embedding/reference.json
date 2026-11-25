@@ -1,0 +1,180 @@
+{
+ "tokens": [
+  {
+   "text": "Hello, world!",
+   "ids": [
+    101,
+    7592,
+    1010,
+    2088,
+    999,
+    102
+   ]
+  },
+  {
+   "text": "The halting problem is undecidable.",
+   "ids": [
+    101,
+    1996,
+    9190,
+    2075,
+    3291,
+    2003,
+    6151,
+    8586,
+    8524,
+    3468,
+    1012,
+    102
+   ]
+  },
+  {
+   "text": "Café crème brûlée",
+   "ids": [
+    101,
+    7668,
+    13675,
+    21382,
+    7987,
+    9307,
+    2063,
+    102
+   ]
+  },
+  {
+   "text": "q3_report-final.pdf",
+   "ids": [
+    101,
+    1053,
+    2509,
+    1035,
+    3189,
+    1011,
+    2345,
+    1012,
+    11135,
+    102
+   ]
+  },
+  {
+   "text": "don't stop",
+   "ids": [
+    101,
+    2123,
+    1005,
+    1056,
+    2644,
+    102
+   ]
+  },
+  {
+   "text": "unaffable",
+   "ids": [
+    101,
+    14477,
+    20961,
+    3468,
+    102
+   ]
+  },
+  {
+   "text": "東京 tower",
+   "ids": [
+    101,
+    1879,
+    1755,
+    3578,
+    102
+   ]
+  },
+  {
+   "text": "naïve résumé 42.5%",
+   "ids": [
+    101,
+    15743,
+    13746,
+    4413,
+    1012,
+    1019,
+    1003,
+    102
+   ]
+  },
+  {
+   "text": "  tabs\tand\nnewlines  ",
+   "ids": [
+    101,
+    21628,
+    2015,
+    1998,
+    2047,
+    12735,
+    102
+   ]
+  },
+  {
+   "text": "emoji 😀 ok",
+   "ids": [
+    101,
+    7861,
+    29147,
+    2072,
+    100,
+    7929,
+    102
+   ]
+  },
+  {
+   "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "ids": [
+    101,
+    100,
+    102
+   ]
+  }
+ ],
+ "embeddings": [
+  {
+   "text": "The halting problem is undecidable.",
+   "first8": [
+    -0.08925,
+    0.01265,
+    -0.02312,
+    0.03096,
+    -0.01196,
+    -0.02774,
+    0.01241,
+    -0.01208
+   ]
+  },
+  {
+   "text": "A cat sat on the mat.",
+   "first8": [
+    0.03017,
+    -0.01515,
+    0.01532,
+    0.07165,
+    -0.03771,
+    -0.00268,
+    0.08531,
+    0.09244
+   ]
+  }
+ ],
+ "model": "BAAI/bge-small-en-v1.5 (CLS pooling; queries prefixed with the retrieval instruction)",
+ "queries": [
+  {
+   "text": "energy transformation",
+   "first8": [
+    -0.01176,
+    -0.07039,
+    0.02126,
+    0.04675,
+    -0.02531,
+    0.01983,
+    -0.00866,
+    -0.01799
+   ]
+  }
+ ]
+}

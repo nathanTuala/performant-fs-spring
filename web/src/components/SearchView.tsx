@@ -9,11 +9,13 @@ interface Results {
   /** The query these results answer; may lag behind `q` while a new search is running. */
   query: string;
   items: SearchHit[];
+  /** Related by meaning; arrives with the first page and stays while more pages load. */
+  related: SearchHit[];
   cursor: string | null;
   error: string | null;
 }
 
-const NONE: Results = { query: '', items: [], cursor: null, error: null };
+const NONE: Results = { query: '', items: [], related: [], cursor: null, error: null };
 
 /**
  * Results for `q`, which changes as the user types. The previous results stay on screen
@@ -35,12 +37,13 @@ export function SearchView({ q }: { q: string }) {
       setResults((prev) => ({
         query,
         items: from ? [...prev.items, ...page.items] : page.items,
+        related: from ? prev.related : (page.related ?? []),
         cursor: page.nextCursor,
         error: null,
       }));
     } catch (err) {
       if (isAbort(err)) return;
-      setResults({ query, items: [], cursor: null, error: err instanceof Error ? err.message : 'Search failed' });
+      setResults({ query, items: [], related: [], cursor: null, error: err instanceof Error ? err.message : 'Search failed' });
     } finally {
       if (inFlight.current === controller) {
         inFlight.current = null;
@@ -56,7 +59,7 @@ export function SearchView({ q }: { q: string }) {
     return () => inFlight.current?.abort();
   }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { items, cursor, error } = results;
+  const { items, related, cursor, error } = results;
   const settled = !loading && results.query === q;
 
   function open(node: SearchHit) {
@@ -75,33 +78,13 @@ export function SearchView({ q }: { q: string }) {
         <div className="search-progress" aria-hidden="true" />
         {error && <p className="search-error" role="alert">{error}</p>}
         {!error && q.trim() && settled && items.length === 0 && (
-          <p className="search-empty" role="status">No files or folders match <q>{q}</q>.</p>
+          <p className="search-empty" role="status">
+            {related.length === 0 ? <>No files or folders match <q>{q}</q>.</> : <>No files contain <q>{q}</q>.</>}
+          </p>
         )}
         {items.length > 0 && (
           <ul className="rows plain search-results" aria-label="Search results">
-            {items.map((node) => (
-              <li key={node.id} className={`row${node.snippet ? ' has-snippet' : ''}`}>
-                <div className="col name">
-                  <Icon name={iconFor(node)} className={node.kind === 'folder' ? 'folder-icon' : 'file-icon'} />
-                  <div className="result-main">
-                    <button className="result-name ellipsis" onClick={() => open(node)} title={`Open ${node.name}`}>
-                      {node.name}
-                    </button>
-                    {node.snippet && <Excerpt snippet={node.snippet} />}
-                  </div>
-                </div>
-                <nav className="col location small muted ellipsis" aria-label={`Location of ${node.name}`}>
-                  {node.path.map((crumb, i) => (
-                    <span key={crumb.id}>
-                      {i > 0 && ' / '}
-                      <button className="link-muted" onClick={() => navigate({ view: 'folder', id: crumb.id })}>{crumb.name}</button>
-                    </span>
-                  ))}
-                </nav>
-                <div className="col date muted">{formatDate(node.updatedAt)}</div>
-                <div className="col size muted">{node.kind === 'folder' ? '—' : formatBytes(node.size)}</div>
-              </li>
-            ))}
+            {items.map((node) => <ResultRow key={node.id} node={node} onOpen={open} />)}
           </ul>
         )}
         {cursor && (
@@ -111,13 +94,50 @@ export function SearchView({ q }: { q: string }) {
             </button>
           </div>
         )}
+        {related.length > 0 && (
+          <section className="related" aria-labelledby="related-heading">
+            <h2 id="related-heading" className="related-heading small">
+              Related by meaning
+              <span className="muted"> · files about this, even without these words</span>
+            </h2>
+            <ul className="rows plain search-results" aria-label="Related by meaning">
+              {related.map((node) => <ResultRow key={node.id} node={node} onOpen={open} related />)}
+            </ul>
+          </section>
+        )}
       </div>
     </section>
   );
 }
 
+function ResultRow({ node, onOpen, related = false }: { node: SearchHit; onOpen: (n: SearchHit) => void; related?: boolean }) {
+  return (
+    <li className={`row${node.snippet ? ' has-snippet' : ''}`}>
+      <div className="col name">
+        <Icon name={iconFor(node)} className={node.kind === 'folder' ? 'folder-icon' : 'file-icon'} />
+        <div className="result-main">
+          <button className="result-name ellipsis" onClick={() => onOpen(node)} title={`Open ${node.name}`}>
+            {node.name}
+          </button>
+          {node.snippet && <Excerpt snippet={node.snippet} title={related ? 'The passage closest in meaning' : 'Found inside the file'} />}
+        </div>
+      </div>
+      <nav className="col location small muted ellipsis" aria-label={`Location of ${node.name}`}>
+        {node.path.map((crumb, i) => (
+          <span key={crumb.id}>
+            {i > 0 && ' / '}
+            <button className="link-muted" onClick={() => navigate({ view: 'folder', id: crumb.id })}>{crumb.name}</button>
+          </span>
+        ))}
+      </nav>
+      <div className="col date muted">{formatDate(node.updatedAt)}</div>
+      <div className="col size muted">{node.kind === 'folder' ? '—' : formatBytes(node.size)}</div>
+    </li>
+  );
+}
+
 /** The words found inside the file, in context. React escapes the text; marks are added by range. */
-function Excerpt({ snippet }: { snippet: Snippet }) {
+function Excerpt({ snippet, title }: { snippet: Snippet; title: string }) {
   const parts: ReactNode[] = [];
   let at = 0;
   for (const { start, end } of snippet.highlights) {
@@ -126,5 +146,5 @@ function Excerpt({ snippet }: { snippet: Snippet }) {
     at = end;
   }
   parts.push(snippet.text.slice(at));
-  return <p className="snippet small muted" title="Found inside the file">{parts}</p>;
+  return <p className="snippet small muted" title={title}>{parts}</p>;
 }

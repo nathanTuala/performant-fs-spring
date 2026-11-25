@@ -2,6 +2,7 @@ package com.performantfs.search;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * A short excerpt of a file's text around a match. Highlights are character ranges into
@@ -16,6 +17,7 @@ public record Snippet(String text, List<Span> highlights) {
     static final char START = '\u0002';
     static final char STOP = '\u0003';
     private static final String ELLIPSIS = "…";
+    private static final Pattern LEADING_PUNCTUATION = Pattern.compile("^[\\p{P}\\s]+");
 
     /**
      * Turns ts_headline output into plain text plus ranges.
@@ -41,5 +43,17 @@ public record Snippet(String text, List<Span> highlights) {
         }
         if (cutEnd) text.append(ELLIPSIS);
         return new Snippet(text.toString(), spans);
+    }
+
+    /** The start of a passage, cut at a word boundary; nothing highlighted (it matched by meaning). */
+    static Snippet excerpt(String passage, int maxChars) {
+        // Passages start wherever their word window does, often mid-sentence: drop leading
+        // punctuation ("…. 3. Resume") and mark the cut instead.
+        String stripped = passage.strip();
+        String text = LEADING_PUNCTUATION.matcher(stripped).replaceFirst("");
+        if (text.length() < stripped.length()) text = ELLIPSIS + text;
+        if (text.length() <= maxChars) return new Snippet(text, List.of());
+        int cut = text.lastIndexOf(' ', maxChars);
+        return new Snippet(text.substring(0, cut > maxChars / 2 ? cut : maxChars) + ELLIPSIS, List.of());
     }
 }
