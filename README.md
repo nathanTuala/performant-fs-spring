@@ -3,7 +3,7 @@
 A hosted file system in the spirit of Google Drive:
 - **Files:** upload files and whole folder trees (drag-and-drop or picker), with large uploads resuming after a dropped connection.
 - **Organising:** move by drag-and-drop with undo, rename, expand folders in place, trash and restore.
-- **Finding and downloading:** search as you type, and download with resumable Range requests.
+- **Finding and downloading:** search names and the text inside files as you type, and download with resumable Range requests.
 
 **Stack:** Java 25, Spring Boot 4.2 (MVC, Security, JDBC, Flyway) and PostgreSQL 16 for metadata, a content-addressed blob store on disk, and a React + Vite web app.
 
@@ -51,6 +51,13 @@ Files up to 8 MB use `POST /api/files`, which hashes while streaming. Neither pa
 
 **Search** (`search/`) parses `quarterly report "exact phrase" type:pdf size:>10mb modified:<2026-01-01 in:"Tax returns"`. Words match as prefixes through a tsvector GIN index, or fuzzily through a trigram index (typos like "quartrly" work). Results are ranked, keyset-paginated, and shown with their folder path.
 
+**Content search** finds words inside PDFs and text files (Markdown, CSV, JSON, source code):
+- *What a file is* comes from its bytes, not its name: a `%PDF-` header is read with PDFBox; valid UTF-8 with no NUL bytes is read as text; everything else is skipped.
+- *Text is stored once per blob* (`blob_text`, with a GIN-indexed tsvector), so duplicate files are read once. Each upload queues its blob in the same transaction that stores it.
+- *A background worker* (`ContentIndexer`) is woken after each upload commits, with a 30 s poll as backup. It claims rows with a short `SKIP LOCKED` statement and extracts with no lock held, so a slow PDF never blocks an upload or garbage collection. A crashed worker's claim is retried; a file that fails three times is marked `failed`.
+- *Files are untrusted*, so extraction is capped: 64 MB per PDF, 1,000 pages, 500,000 characters kept, 20 s.
+- *Querying:* every word must be in the name, or every word in the contents. The two are separate index lookups, unioned, so both stay indexed. Name matches rank first. Results found by contents carry a snippet built from a ~300-character window around the first match, for the returned page only. Highlights are character ranges, never markup.
+
 **Data access** uses Spring's `JdbcClient` with plain SQL and Flyway migrations, not JPA. The tree relies on recursive CTEs, keyset row comparisons, partial unique indexes with `ON CONFLICT`, data-modifying CTEs and advisory locks, all first-class in SQL and awkward in an ORM.
 
 ### Concurrency decisions
@@ -96,6 +103,7 @@ Rule from Grand Charter: high-level libraries that ship file-management function
 | --- | --- |
 | Spring Boot (Web MVC, Security, JDBC, Validation) | HTTP framework, auth plumbing, database access, request validation |
 | Flyway | Database migrations |
+| Apache PDFBox | Reads the text out of PDFs for content search. A parser for one format; indexing, queueing and querying are ours. |
 | PostgreSQL JDBC driver | Database driver |
 | Testcontainers, JUnit 5, AssertJ | Tests against a real Postgres |
 | React, Vite, TypeScript | Web app and build |
@@ -105,9 +113,10 @@ Everything that does file-system work is written in this repo:
 - content addressing, deduplication and garbage collection
 - Range and ETag handling (by hand, not Spring's `ResourceRegion`)
 - tree operations and cycle checks
+- content indexing: the queue, format detection, limits, snippets
 - the folder-drop walker and the virtual list in the web app
 
 ## Status
 
-- **Done:** auth, uploads (chunked, resumable, parallel, single-request, folder trees), listing, move/rename/bulk move with undo, trash and restore, downloads with Range, quota, background maintenance, web app, Docker image, search by name (as-you-type, prefixes, typos, filters, `in:` scope).
-- **Next:** content search with Apache Tika (find words inside PDFs and text files), then semantic search with pgvector.
+- **Done:** auth, uploads (chunked, resumable, parallel, single-request, folder trees), listing, move/rename/bulk move with undo, trash and restore, downloads with Range, quota, background maintenance, web app, Docker image, search by name (as-you-type, prefixes, typos, filters, `in:` scope), content search inside PDFs and text files with snippets.
+- **Next:** semantic search with pgvector (find files by meaning, combined with keyword search). Office documents (Word, Excel, PowerPoint) could be added to content search with Apache POI.
