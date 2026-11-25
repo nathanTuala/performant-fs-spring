@@ -95,9 +95,16 @@ fun sha256(file: File): String? {
     return digest.digest().joinToString("") { "%02x".format(it) }
 }
 
-// Tests and the dev server load the model.
-tasks.withType<Test> { dependsOn(downloadModel) }
-tasks.named("bootRun") { dependsOn(downloadModel) }
+// Tests and the dev server load the model. ONNX Runtime loads a native library, which
+// Java 25 asks to be allowed explicitly.
+tasks.withType<Test> {
+    dependsOn(downloadModel)
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
+    dependsOn(downloadModel)
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
 
 // One runnable jar with a fixed name, for the Docker image.
 tasks.bootJar {
