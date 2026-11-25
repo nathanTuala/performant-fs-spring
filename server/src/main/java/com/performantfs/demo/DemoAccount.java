@@ -40,11 +40,14 @@ public class DemoAccount {
 
     private static final Logger log = LoggerFactory.getLogger(DemoAccount.class);
 
-    /** Folder → files, as resource name → name in the account. Null folder: the top level. */
+    /**
+     * Folder → files, as resource name → name in the account. The searches to try live in the
+     * README, not in a file here: a note listing "how do plants make food" would match that search
+     * by keyword and spoil the point that no file contains those words.
+     */
     private static final Map<String, Map<String, String>> SAMPLES = new LinkedHashMap<>();
 
     static {
-        SAMPLES.put(null, Map.of("Welcome - try these searches.md", "Welcome - try these searches.md"));
         SAMPLES.put("Coursework", Map.of(
                 "biology-lecture-notes.md", "Biology lecture 7 - notes.md",
                 "linear-algebra-notes.txt", "Linear algebra week 9.txt"));
@@ -84,9 +87,7 @@ public class DemoAccount {
     private void seed(AuthUser user) {
         Map<String, UUID> folders = new LinkedHashMap<>();
         for (var folder : SAMPLES.entrySet()) {
-            UUID parent = folder.getKey() == null
-                    ? user.rootId()
-                    : nodes.createFolder(user.id(), user.rootId(), folder.getKey(), ConflictPolicy.RENAME).id();
+            UUID parent = nodes.createFolder(user.id(), user.rootId(), folder.getKey(), ConflictPolicy.RENAME).id();
             folders.put(folder.getKey(), parent);
             for (var file : folder.getValue().entrySet()) store(user, parent, file.getValue(), read(file.getKey()));
         }
