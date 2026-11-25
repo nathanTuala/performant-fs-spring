@@ -1,0 +1,5 @@
+CS 374 Homework 5: Computability
+Problem 1. Prove that the halting problem is undecidable: no Turing machine can decide, for every program P and input x, whether P eventually stops when run on x.
+Hint: assume a decider H exists and build a program D that runs H on itself and does the opposite of whatever H predicts.
+Problem 2. Show that the language of Turing machines that accept the empty string is undecidable, by a reduction from the halting problem.
+Problem 3. Rice's theorem: explain why every non-trivial semantic property of programs is undecidable, and give an example of a property that is decidable because it is syntactic.
