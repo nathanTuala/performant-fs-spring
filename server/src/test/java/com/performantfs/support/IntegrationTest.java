@@ -11,6 +11,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 
 /**
  * Base for end-to-end tests: the real server on a random port, backed by a real Postgres
@@ -19,6 +20,9 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(TestcontainersConfiguration.class)
+// The app ships with sign-in off; tests cover accounts and isolation, so they turn it on.
+// (A property source, not a dynamic property, so a subclass can switch it off again.)
+@TestPropertySource(properties = "pfs.sign-in-required=true")
 public abstract class IntegrationTest {
 
     @LocalServerPort

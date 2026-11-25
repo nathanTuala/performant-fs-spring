@@ -67,10 +67,12 @@ function Shell({ user, onSignOut }: { user: User; onSignOut: () => void }) {
             <span className="small muted">{formatBytes(usage.fileBytes)} used</span>
           </div>
         )}
-        <div className="account">
-          <span className="small muted ellipsis" title={user.email}>{user.email}</span>
-          <button className="icon-btn" aria-label="Sign out" onClick={signOut}><Icon name="logout" size={16} /></button>
-        </div>
+        {user.signInRequired !== false && (
+          <div className="account">
+            <span className="small muted ellipsis" title={user.email}>{user.email}</span>
+            <button className="icon-btn" aria-label="Sign out" onClick={signOut}><Icon name="logout" size={16} /></button>
+          </div>
+        )}
       </aside>
       <main className="main">
         <div className="topbar">

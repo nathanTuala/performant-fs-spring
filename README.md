@@ -22,6 +22,8 @@ cd web && npm install && npm run dev # UI on :5173, proxies /api to :8090
 cd server && ./gradlew test          # unit + integration tests against a real Postgres (Testcontainers)
 ```
 
+**Sign-in is off for now:** the app opens straight to the files, and everyone shares one local account. Set `pfs.sign-in-required=true` (or `PFS_SIGN_IN_REQUIRED=true`) to require accounts again. The account system, sessions and per-user isolation are unchanged and still covered by the tests, which run with sign-in on.
+
 ## How it works
 
 **Metadata and bytes take separate paths.**
@@ -80,6 +82,7 @@ Background maintenance (`maintenance/`, every minute) does the following; each s
 
 ## Security
 
+- **Sign-in switch:** `pfs.sign-in-required` defaults to `true` in code, so a deployment is never open by accident. Only `application.properties` turns it off for now.
 - **Sessions:** our own, behind Spring Security. The cookie holds a random 256-bit token and the database stores only its SHA-256. The cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` behind HTTPS.
 - **Passwords:** Spring Security's delegating encoder (bcrypt, stored with an upgradeable `{bcrypt}` prefix). Login runs the hash even for unknown emails, so timing doesn't reveal which emails have accounts.
 - **Ownership:** every lookup is scoped to the owner, so another user's id is a 404, never a 403.

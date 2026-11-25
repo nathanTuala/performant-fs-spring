@@ -53,6 +53,8 @@ export interface User {
   id: string;
   email: string;
   rootId: string;
+  /** From /auth/me: false while the server runs without sign-in (one shared local account). */
+  signInRequired?: boolean;
 }
 
 export interface Usage {
