@@ -34,5 +34,24 @@ public abstract class IntegrationTest {
     }
 
     /** A signed-in client plus the ids tests usually need. */
-    public record TestUser(ApiClient api, UUID id, UUID rootId) {}
+    public record TestUser(ApiClient api, UUID id, UUID rootId) {
+
+        /** Creates a folder and returns its id. */
+        public UUID folder(String name, UUID parentId) {
+            var res = api.post("/api/folders", Map.of("parentId", parentId, "name", name));
+            if (res.status() != 201) throw new IllegalStateException("create folder failed: " + res.status() + " " + res.text());
+            return UUID.fromString(res.json().path("id").asString());
+        }
+
+        public UUID folder(String name) {
+            return folder(name, rootId);
+        }
+
+        /** GET /api/nodes/{folder}/children with an optional query string (e.g. "?limit=4"). */
+        public tools.jackson.databind.JsonNode children(UUID folderId, String query) {
+            var res = api.get("/api/nodes/" + folderId + "/children" + query);
+            if (res.status() != 200) throw new IllegalStateException("list failed: " + res.status() + " " + res.text());
+            return res.json();
+        }
+    }
 }
