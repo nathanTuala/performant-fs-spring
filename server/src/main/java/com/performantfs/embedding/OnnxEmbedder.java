@@ -52,7 +52,17 @@ public class OnnxEmbedder implements Embedder {
     }
 
     @Override
-    public float[][] embed(List<String> texts) {
+    public float[][] embedPassages(List<String> passages) {
+        return embed(passages);
+    }
+
+    /** all-MiniLM-L6-v2 is symmetric: a query is embedded exactly like a passage. */
+    @Override
+    public float[] embedQuery(String query) {
+        return embed(List.of(query))[0];
+    }
+
+    private float[][] embed(List<String> texts) {
         float[][] out = new float[texts.size()][];
         for (int from = 0; from < texts.size(); from += BATCH) {
             List<String> batch = texts.subList(from, Math.min(texts.size(), from + BATCH));

@@ -40,7 +40,7 @@ class OnnxEmbedderTest {
         }
         // Embedded together, so padding is exercised: the second sentence is shorter.
         List<String> texts = reference.path("embeddings").valueStream().map(e -> e.path("text").asString()).toList();
-        float[][] vectors = embedder.embed(texts);
+        float[][] vectors = embedder.embedPassages(texts);
         for (int i = 0; i < texts.size(); i++) {
             JsonNode expected = reference.path("embeddings").get(i).path("first8");
             for (int d = 0; d < 8; d++) {
@@ -51,14 +51,14 @@ class OnnxEmbedderTest {
 
     @Test
     void returnsUnitVectorsOfTheRightLength() {
-        float[] v = embedder.embed("quarterly budget review");
+        float[] v = embedder.embedQuery("quarterly budget review");
         assertThat(v).hasSize(Embedder.DIMENSIONS);
         assertThat(cosine(v, v)).isCloseTo(1.0, within(1e-5));
     }
 
     @Test
     void placesTextsWithTheSameMeaningCloseTogether() {
-        float[][] v = embedder.embed(List.of(
+        float[][] v = embedder.embedPassages(List.of(
                 "How do I bake bread at home?",
                 "A simple recipe for a sourdough loaf",
                 "The deadline for filing your tax return"));
@@ -68,9 +68,9 @@ class OnnxEmbedderTest {
     @Test
     void handlesMoreTextsThanOneBatchAndOverlongText() {
         List<String> many = java.util.stream.IntStream.range(0, 40).mapToObj(i -> "note number " + i).toList();
-        float[][] vectors = embedder.embed(many);
+        float[][] vectors = embedder.embedPassages(many);
         assertThat(vectors).hasNumberOfRows(40);
         for (float[] v : vectors) assertThat(v).hasSize(Embedder.DIMENSIONS);
-        assertThat(embedder.embed("word ".repeat(5000))).hasSize(Embedder.DIMENSIONS);
+        assertThat(embedder.embedQuery("word ".repeat(5000))).hasSize(Embedder.DIMENSIONS);
     }
 }

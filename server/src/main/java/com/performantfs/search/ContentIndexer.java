@@ -145,7 +145,7 @@ public class ContentIndexer {
         if (result instanceof Result.Text t) {
             try {
                 passages = Passages.DEFAULT.split(t.text());
-                vectors = embedder.embed(passages);
+                vectors = embedder.embedPassages(passages);
             } catch (RuntimeException e) {
                 log.warn("could not embed {}", claim.hash(), e);
                 result = new Result.Failed("could not embed the text");

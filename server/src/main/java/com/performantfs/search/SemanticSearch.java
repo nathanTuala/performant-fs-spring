@@ -56,7 +56,7 @@ public class SemanticSearch {
 
         Map<String, Object> params = new HashMap<>();
         params.put("owner", ownerId);
-        params.put("q", ContentIndexer.vectorLiteral(embedder.embed(text)));
+        params.put("q", ContentIndexer.vectorLiteral(embedder.embedQuery(text)));
         params.put("candidates", CANDIDATES);
         params.put("max", MAX_DISTANCE);
         SearchFilters filters = SearchFilters.of(q, params);
