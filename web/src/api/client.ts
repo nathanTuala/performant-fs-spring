@@ -6,6 +6,7 @@ import type {
   NodeDto,
   NodeWithPath,
   SearchHit,
+  SearchResults,
   Page,
   SortDir,
   SortKey,
@@ -77,7 +78,7 @@ export const api = {
   search: (q: string, cursor?: string | null, signal?: AbortSignal) => {
     const params = new URLSearchParams({ q });
     if (cursor) params.set('cursor', cursor);
-    return request<Page<SearchHit>>('GET', `/search?${params}`, undefined, signal);
+    return request<SearchResults>('GET', `/search?${params}`, undefined, signal);
   },
 
   contentUrl: (id: string, download = false) => `/api/files/${id}/content${download ? '?download=1' : ''}`,

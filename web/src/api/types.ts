@@ -40,6 +40,11 @@ export interface SearchHit extends NodeWithPath {
   snippet?: Snippet;
 }
 
+export interface SearchResults extends Page<SearchHit> {
+  /** First page only: files close in meaning that the keyword results don't already show. */
+  related?: SearchHit[];
+}
+
 export type SortKey = 'name' | 'size' | 'modified';
 export type SortDir = 'asc' | 'desc';
 
