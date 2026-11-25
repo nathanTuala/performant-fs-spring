@@ -9,6 +9,29 @@ What it does:
 
 **Stack:** Java 25, Spring Boot 4.2 (MVC, Security, JDBC, Flyway) and PostgreSQL 16 with pgvector for metadata and search, a content-addressed blob store on disk, and a React + Vite web app.
 
+## Try it
+
+Run it (below), open the app, and sign in with the **demo account**. The sign-in page also offers a button that fills these in:
+
+| Email | Password |
+| --- | --- |
+| `demo@performant-fs.dev` | `try-the-demo-2026` |
+
+It comes with sample files (course notes, a homework PDF, a trip plan, a budget), written for this repo. You can also create your own account from the same page. Searches to try:
+
+| Type | What it shows |
+| --- | --- |
+| `quartrly` | A typo still finds *Quarterly budget 2026.csv* |
+| `halting` | A word found only **inside** a PDF, highlighted in an excerpt |
+| `halting type:pdf in:Coursework` | The same, narrowed with filters |
+| `how do plants make food` | No file contains these words, but the photosynthesis notes appear under **Related by meaning** |
+| `weekend getaway to Portugal` | The Lisbon trip, also by meaning |
+| `football world cup results` | Nothing is related, and none is shown |
+
+Then upload your own: drag a whole folder onto the page, or a large video. It goes up in resumable 8 MB pieces, so switch your network off and on mid-upload and it carries on.
+
+The demo password is public by design: don't store anything real in that account. A deployment disables it by leaving `pfs.demo-email` and `pfs.demo-password` empty.
+
 ## Design decisions at a glance
 
 | Decision | Why | Trade-off accepted |
@@ -23,7 +46,7 @@ What it does:
 | **Indexing in the background, queued in the upload's own transaction** | Uploads never wait for PDF parsing; a crash can't lose a queued file; identical files are read once | Search inside a new file lags its upload by a second or two |
 | **HTTP caching, no Redis** | Downloads already get ETag and `immutable` caching; hot queries are single-digit milliseconds on indexes. A server cache would add invalidation bugs to moves, trash and undo | Usage stats are computed per request; running totals would be the next step at scale |
 | **OpenTelemetry for observability** | The industry standard: traces show each search stage and what it returned, the dashboard shows system health, logs carry trace ids. Export is off unless enabled | The Grafana image is large (2.6 GB, development only) |
-| **Sign-in switched off for the demo** | Opens straight to the files. Accounts, sessions and per-user isolation are intact and tested; one setting turns sign-in back on | Everyone shares one local account while it's off |
+| **A demo account with public credentials** | Reviewers get straight in, to a populated account, without signing up; it's created and seeded at startup through the normal upload path | Anyone with the README can use that account, so it holds only sample data and can be disabled by configuration |
 
 ## Run it
 
@@ -40,7 +63,7 @@ cd web && npm install && npm run dev # UI on :5173, proxies /api to :8090
 cd server && ./gradlew test          # unit + integration tests against a real Postgres (Testcontainers)
 ```
 
-**Sign-in is off for now:** the app opens straight to the files, and everyone shares one local account. Set `pfs.sign-in-required=true` (or `PFS_SIGN_IN_REQUIRED=true`) to require accounts again. The account system, sessions and per-user isolation are unchanged and still covered by the tests, which run with sign-in on.
+Sign in with the demo account above, or create your own. (Sign-in can be switched off for local experiments with `pfs.sign-in-required=false`. Everyone then shares one local account.)
 
 ## How it works
 
@@ -144,7 +167,8 @@ The compose app logs JSON (ECS). Logs never include file names, emails or the qu
 
 ## Security
 
-- **Sign-in switch:** `pfs.sign-in-required` defaults to `true` in code, so a deployment is never open by accident. Only `application.properties` turns it off for now.
+- **Sign-in:** required. `pfs.sign-in-required` defaults to `true`, so a deployment is never open by accident.
+- **Demo account:** its credentials are public by design, served to the sign-in page and listed above. It holds only sample data, and empty `pfs.demo-*` settings disable it.
 - **Sessions:** our own, behind Spring Security. The cookie holds a random 256-bit token and the database stores only its SHA-256. The cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` behind HTTPS.
 - **Passwords:** Spring Security's delegating encoder (bcrypt, stored with an upgradeable `{bcrypt}` prefix). Login runs the hash even for unknown emails, so timing doesn't reveal which emails have accounts.
 - **Ownership:** every lookup is scoped to the owner, so another user's id is a 404, never a 403.
@@ -205,7 +229,7 @@ Everything that does file-system work is written in this repo:
 
 ## How it was built
 
-Built in 18 small pull requests, each with focused commits and green CI, so the history reads as a story ([all PRs](https://github.com/nathanTuala/performant-fs-spring/pulls?q=is%3Apr)):
+Built in 19 small pull requests, each with focused commits and green CI, so the history reads as a story ([all PRs](https://github.com/nathanTuala/performant-fs-spring/pulls?q=is%3Apr)):
 
 | PRs | What |
 | --- | --- |
@@ -214,11 +238,12 @@ Built in 18 small pull requests, each with focused commits and green CI, so the 
 | #8–#9 | Move, rename, trash, restore; background maintenance |
 | #10–#11 | React web app; serving it, Docker image |
 | #12–#13 | Search as you type; content search inside PDFs and text files |
-| #14 | Sign-in switch (off for the demo) |
+| #14 | Sign-in switch |
 | #15 | Semantic search (local model + pgvector) |
 | #16 | Drag items out of an expanded folder |
 | #17 | Observability: OpenTelemetry + Grafana |
 | #18 | This README |
+| #19 | Sign-in back on, with a demo account and sample files |
 
 ## How I used AI tools
 
@@ -228,7 +253,7 @@ I built this with **Claude Code** (Anthropic's coding agent) as a pair programme
 - **Scope and stack.** A first version was written in Node/TypeScript. I switched it to **Java 25 and Spring Boot**, the stack I want to be evaluated on, and had it rebuilt as this repo in small PRs.
 - **Process.** I asked for small, focused commits and stacked PRs, so every change could be reviewed and followed.
 - **Interpreting the brief.** I asked what "search and query through the files" means, which led to searching file contents and then meaning, not just names. I checked that each library fits the "no premade file-management libraries" rule; PDFBox, ONNX Runtime and pgvector are parsers and infrastructure, and the file-system logic is ours.
-- **Product calls.** I chose a local embedding model over a hosted API (privacy, no keys), OpenTelemetry + Grafana for observability, Finder-style folders, and turning sign-in off for the demo.
+- **Product calls.** I chose a local embedding model over a hosted API (privacy, no keys), OpenTelemetry + Grafana for observability, Finder-style folders, and a demo account with public credentials so reviewers can get straight in.
 - **Testing it as a user, and reporting what was wrong.** Each of these was fixed with a regression test where it applies:
   - the search view could trap you, with no way back to your files;
   - the empty state showed syntax tips instead of a plain message;
