@@ -1,5 +1,5 @@
 import type { User } from '../api/types';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api/client';
 
 export function Login({ onSignedIn }: { onSignedIn: (user: User) => void }) {
@@ -8,6 +8,11 @@ export function Login({ onSignedIn }: { onSignedIn: (user: User) => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Offered when the server has a demo account (404 otherwise, and the button never shows).
+  const [demo, setDemo] = useState<{ email: string; password: string } | null>(null);
+  useEffect(() => {
+    api.demoCredentials().then(setDemo, () => setDemo(null));
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -37,6 +42,15 @@ export function Login({ onSignedIn }: { onSignedIn: (user: User) => void }) {
             value={password} onChange={(e) => setPassword(e.target.value)} />
         </label>
         {error && <p className="form-error" role="alert">{error}</p>}
+        {demo && mode === 'login' && (
+          <p className="demo-hint small muted">
+            Just looking?{' '}
+            <button type="button" className="link" onClick={() => { setEmail(demo.email); setPassword(demo.password); }}>
+              Use the demo account
+            </button>{' '}
+            ({demo.email} / {demo.password})
+          </p>
+        )}
         <button className="btn primary" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
         <button type="button" className="link" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(null); }}>
           {mode === 'login' ? 'New here? Create an account' : 'Already have an account? Sign in'}

@@ -1,0 +1,4 @@
+Linear algebra, week 9: eigenvalues and eigenvectors.
+An eigenvector of a square matrix A is a non-zero vector v that A only stretches: A v = lambda v, where lambda is the eigenvalue.
+Find eigenvalues by solving det(A - lambda I) = 0, then each eigenvector by solving (A - lambda I) v = 0.
+A matrix with n distinct eigenvalues is diagonalizable: A = P D P^-1, which makes powers like A^100 easy to compute.

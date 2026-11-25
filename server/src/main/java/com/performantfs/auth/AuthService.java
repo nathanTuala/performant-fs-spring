@@ -62,6 +62,19 @@ public class AuthService {
         return row.filter(r -> matches).map(r -> new AuthUser(r.id(), r.email(), r.rootId()));
     }
 
+    /** The account with this email, if any. */
+    public Optional<AuthUser> find(String rawEmail) {
+        return db.sql("SELECT id, email, root_id FROM users WHERE lower(email) = ?")
+                .param(normalize(rawEmail))
+                .query((rs, n) -> new AuthUser(rs.getObject(1, UUID.class), rs.getString(2), rs.getObject(3, UUID.class)))
+                .optional();
+    }
+
+    /** Replaces an account's password (hashed like any other). */
+    public void setPassword(UUID userId, String password) {
+        db.sql("UPDATE users SET password_hash = ? WHERE id = ?").params(passwords.encode(password), userId).update();
+    }
+
     private static String normalize(String email) {
         return email.trim().toLowerCase(Locale.ROOT);
     }

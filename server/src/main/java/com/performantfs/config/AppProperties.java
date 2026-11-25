@@ -26,6 +26,8 @@ import org.springframework.util.unit.DataSize;
  *                          ({@link com.performantfs.auth.LocalAccount}); on unless switched off
  * @param secureCookies     mark the session cookie Secure (on in production, behind HTTPS)
  * @param traceSearchText   record search text on traces (off by default: it can be personal)
+ * @param demoEmail         a demo account created at startup, with sample files (empty: none)
+ * @param demoPassword      its password, reset to this value at every startup so documentation stays right
  * @param embeddingModelDir the semantic search model (model.onnx and vocab.txt), from ./gradlew downloadModel
  * @param webDir            the built web app to serve (web/dist); unset in development, where Vite serves it
  */
@@ -44,5 +46,7 @@ public record AppProperties(
         @DefaultValue("true") boolean signInRequired,
         @DefaultValue("false") boolean secureCookies,
         @DefaultValue("false") boolean traceSearchText,
+        @DefaultValue("") String demoEmail,
+        @DefaultValue("") String demoPassword,
         @DefaultValue("models/bge-small-en-v1.5") Path embeddingModelDir,
         Path webDir) {}
