@@ -30,6 +30,8 @@ public abstract class IntegrationTest {
         registry.add("pfs.data-dir", () -> tempDataDir().toString());
         registry.add("pfs.chunk-size", () -> "1MB");
         registry.add("pfs.fast-path-max", () -> "1MB");
+        // Tests run maintenance explicitly; the scheduler must not race them.
+        registry.add("pfs.maintenance-interval", () -> "24h");
     }
 
     private static Path dataDir;

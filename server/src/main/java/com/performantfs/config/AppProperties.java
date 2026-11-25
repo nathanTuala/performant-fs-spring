@@ -19,6 +19,7 @@ import org.springframework.util.unit.DataSize;
  * @param uploadTtl         an upload session idle this long expires
  * @param sessionTtl        lifetime of a sign-in session
  * @param trashRetention    trashed items are purged after this long
+ * @param maintenanceInterval pause between background maintenance runs
  * @param secureCookies     mark the session cookie Secure (on in production, behind HTTPS)
  */
 @ConfigurationProperties("pfs")
@@ -31,4 +32,5 @@ public record AppProperties(
         @DefaultValue("24h") Duration uploadTtl,
         @DefaultValue("30d") Duration sessionTtl,
         @DefaultValue("30d") Duration trashRetention,
+        @DefaultValue("1m") Duration maintenanceInterval,
         @DefaultValue("false") boolean secureCookies) {}
