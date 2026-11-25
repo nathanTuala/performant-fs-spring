@@ -4,7 +4,10 @@ import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import com.performantfs.config.AppProperties;
 import com.performantfs.http.ApiException;
 import com.performantfs.http.ErrorCode;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -33,9 +36,13 @@ class AuthController {
 
     private final AuthService auth;
     private final SessionStore sessions;
-    private final AppProperties props;
+    private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
-    AuthController(AuthService auth, SessionStore sessions, AppProperties props) {
+    private final AppProperties props;
+    private final MeterRegistry meters;
+
+    AuthController(AuthService auth, SessionStore sessions, AppProperties props, MeterRegistry meters) {
+        this.meters = meters;
         this.auth = auth;
         this.sessions = sessions;
         this.props = props;
@@ -48,9 +55,14 @@ class AuthController {
     }
 
     @PostMapping("/login")
-    ResponseEntity<AuthUser> login(@Valid @RequestBody Credentials body) {
-        AuthUser user = auth.authenticate(body.email(), body.password())
-                .orElseThrow(() -> new ApiException(ErrorCode.UNAUTHORIZED, "Email or password is incorrect"));
+    ResponseEntity<AuthUser> login(@Valid @RequestBody Credentials body, HttpServletRequest request) {
+        AuthUser user = auth.authenticate(body.email(), body.password()).orElse(null);
+        meters.counter("pfs.auth.signins", "outcome", user == null ? "failed" : "ok").increment();
+        if (user == null) {
+            // Never the email or password: a failed sign-in is often someone else's address or a typo'd password.
+            log.warn("sign-in failed from {}", request.getRemoteAddr());
+            throw new ApiException(ErrorCode.UNAUTHORIZED, "Email or password is incorrect");
+        }
         return signedIn(HttpStatus.OK, user);
     }
 

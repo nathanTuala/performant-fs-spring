@@ -11,6 +11,8 @@ import jakarta.validation.constraints.Size;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -27,6 +29,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api")
 class NodeController {
+
+    private static final Logger log = LoggerFactory.getLogger(NodeController.class);
 
     record CreateFolder(@NotNull UUID parentId, @NotBlank @Size(max = 255) String name, ConflictPolicy onConflict) {}
 
@@ -94,8 +98,10 @@ class NodeController {
     @PostMapping("/nodes/move")
     Map<String, List<NodeDto>> moveAll(@AuthenticationPrincipal AuthUser user, @Valid @RequestBody BulkMove body) {
         List<UUID> ids = body.ids().stream().distinct().toList();
-        return Map.of("items", service.moveAll(user.id(), ids, body.parentId(), orError(body.onConflict())).stream()
-                .map(NodeRow::toDto).toList());
+        List<NodeDto> moved = service.moveAll(user.id(), ids, body.parentId(), orError(body.onConflict())).stream()
+                .map(NodeRow::toDto).toList();
+        log.info("moved {} item(s) into {} user={}", moved.size(), body.parentId(), user.id());
+        return Map.of("items", moved);
     }
 
     /** Moves an item (and everything inside it) to the trash. */
@@ -103,10 +109,13 @@ class NodeController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     void trash(@AuthenticationPrincipal AuthUser user, @PathVariable UUID id) {
         service.trash(user.id(), id);
+        log.info("trashed {} user={}", id, user.id());
     }
 
     @PostMapping("/nodes/{id}/restore")
     NodeDto restore(@AuthenticationPrincipal AuthUser user, @PathVariable UUID id) {
-        return service.restore(user.id(), user.rootId(), id).toDto();
+        NodeDto restored = service.restore(user.id(), user.rootId(), id).toDto();
+        log.info("restored {} into {} user={}", id, restored.parentId(), user.id());
+        return restored;
     }
 }

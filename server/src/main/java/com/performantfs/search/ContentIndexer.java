@@ -5,6 +5,10 @@ import com.performantfs.embedding.Embedder;
 import com.performantfs.embedding.Passages;
 import com.performantfs.search.TextExtractor.Result;
 import com.performantfs.uploads.FileStored;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
 import java.io.InputStream;
@@ -50,17 +54,31 @@ public class ContentIndexer {
     private final BlobStore blobs;
     private final Embedder embedder;
     private final TransactionTemplate tx;
+    private final MeterRegistry meters;
+    private final Timer extractTimer;
+    private final Timer embedTimer;
     private final TextExtractor extractor = new TextExtractor(TextExtractor.Limits.DEFAULT);
     private final ExecutorService worker =
             Executors.newSingleThreadExecutor(Thread.ofVirtual().name("content-indexer").factory());
     /** True while a drain is queued but not started: wakes in between fold into it. */
     private final AtomicBoolean queued = new AtomicBoolean();
 
-    ContentIndexer(JdbcClient db, BlobStore blobs, Embedder embedder, TransactionTemplate tx) {
+    ContentIndexer(JdbcClient db, BlobStore blobs, Embedder embedder, TransactionTemplate tx, MeterRegistry meters) {
         this.db = db;
         this.blobs = blobs;
         this.embedder = embedder;
         this.tx = tx;
+        this.meters = meters;
+        this.extractTimer = Timer.builder("pfs.indexer.extract").description("Reading the text out of a file").register(meters);
+        this.embedTimer = Timer.builder("pfs.indexer.embed").description("Embedding a file's passages").register(meters);
+        // Read when metrics are exported (every 10 s with the otel profile); a partial index serves it.
+        Gauge.builder("pfs.indexer.queue", this, ContentIndexer::queued)
+                .description("Files waiting to be indexed")
+                .register(meters);
+    }
+
+    private double queued() {
+        return db.sql("SELECT count(*) FROM blob_text WHERE status = 'pending'").query(Long.class).single();
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -135,7 +153,9 @@ public class ContentIndexer {
             result = new Result.Failed("gave up after " + MAX_ATTEMPTS + " attempts");
         } else {
             try (InputStream in = blobs.openBlob(claim.hash(), 0)) {
+                Timer.Sample sample = Timer.start(meters);
                 result = extractor.extract(in, claim.size());
+                sample.stop(extractTimer);
             } catch (IOException e) {
                 result = new Result.Failed("could not read the blob: " + e.getMessage());
             }
@@ -145,7 +165,8 @@ public class ContentIndexer {
         if (result instanceof Result.Text t) {
             try {
                 passages = Passages.DEFAULT.split(t.text());
-                vectors = embedder.embedPassages(passages);
+                List<String> toEmbed = passages;
+                vectors = embedTimer.record(() -> embedder.embedPassages(toEmbed));
             } catch (RuntimeException e) {
                 log.warn("could not embed {}", claim.hash(), e);
                 result = new Result.Failed("could not embed the text");
@@ -173,6 +194,9 @@ public class ContentIndexer {
                 yield "failed";
             }
         };
+        Counter.builder("pfs.indexer.files").description("Files indexed, by outcome").tag("status", status)
+                .register(meters).increment();
+        log.debug("indexed {} status={} passages={}", hash, status, passages.size());
         tx.executeWithoutResult(s -> {
             int updated = db.sql("""
                             UPDATE blob_text SET status = :status, content = :content, claimed_at = NULL, updated_at = now()
