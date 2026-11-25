@@ -42,4 +42,12 @@ public record Snippet(String text, List<Span> highlights) {
         if (cutEnd) text.append(ELLIPSIS);
         return new Snippet(text.toString(), spans);
     }
+
+    /** The start of a passage, cut at a word boundary; nothing highlighted (it matched by meaning). */
+    static Snippet excerpt(String passage, int maxChars) {
+        String text = passage.strip();
+        if (text.length() <= maxChars) return new Snippet(text, List.of());
+        int cut = text.lastIndexOf(' ', maxChars);
+        return new Snippet(text.substring(0, cut > maxChars / 2 ? cut : maxChars) + ELLIPSIS, List.of());
+    }
 }
