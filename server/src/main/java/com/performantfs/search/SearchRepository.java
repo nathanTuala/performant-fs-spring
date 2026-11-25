@@ -26,9 +26,10 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Runs a parsed search for one user. Free text matches whole words or word prefixes through the
- * tsvector GIN index, or names fuzzily through the trigram index. Results are ranked by both,
- * then by recency, and keyset-paginated on that order.
+ * Runs a parsed search for one user. Free text matches names (whole words or word prefixes through
+ * the tsvector GIN index, or fuzzily through the trigram index) or the text inside files (blob_text,
+ * filled by {@link ContentIndexer}). Name matches rank first, then contents matches; then recency.
+ * Results are keyset-paginated on that order.
  */
 @Repository
 public class SearchRepository {
@@ -85,24 +86,61 @@ public class SearchRepository {
         Map<String, Object> params = new HashMap<>();
         params.put("owner", ownerId);
         List<String> where = new ArrayList<>(List.of("n.owner_id = :owner", "n.deleted_at IS NULL", "n.parent_id IS NOT NULL"));
+        List<String> ctes = new ArrayList<>();
+        String from = "nodes n";
         String score = "0";
 
+        // What the words and phrases must match: the name, or (failing that) the file's contents.
+        List<String> nameMatch = new ArrayList<>();
+        String nameScore = "0";
+        List<String> contentQuery = new ArrayList<>();
+        boolean contentPossible = true;
         if (!q.text().isEmpty()) {
             params.put("text", q.text().toLowerCase(Locale.ROOT));
             String prefixes = prefixQuery(q.text());
             if (!prefixes.isEmpty()) {
                 params.put("tsq", prefixes);
-                where.add("(n.search @@ to_tsquery('simple', :tsq) OR :text <% lower(n.name))");
-                score = "ts_rank(n.search, to_tsquery('simple', :tsq)) + word_similarity(:text, lower(n.name))";
-            } else { // nothing word-like (e.g. "/"): only the fuzzy match can apply
-                where.add(":text <% lower(n.name)");
-                score = "word_similarity(:text, lower(n.name))";
+                nameMatch.add("(n.search @@ to_tsquery('simple', :tsq) OR :text <% lower(n.name))");
+                nameScore = "ts_rank(n.search, to_tsquery('simple', :tsq)) + word_similarity(:text, lower(n.name))";
+                contentQuery.add("to_tsquery('simple', :tsq)");
+            } else { // nothing word-like (e.g. "/"): only the fuzzy name match can apply
+                nameMatch.add(":text <% lower(n.name)");
+                nameScore = "word_similarity(:text, lower(n.name))";
+                contentPossible = false;
             }
         }
         for (int i = 0; i < q.phrases().size(); i++) {
-            params.put("phrase" + i, "%" + escapeLike(q.phrases().get(i).toLowerCase(Locale.ROOT)) + "%");
-            where.add("lower(n.name) LIKE :phrase" + i);
+            String phrase = q.phrases().get(i);
+            params.put("phrase" + i, "%" + escapeLike(phrase.toLowerCase(Locale.ROOT)) + "%");
+            nameMatch.add("lower(n.name) LIKE :phrase" + i);
+            // In contents a phrase is words in that order; one with no words can't match there.
+            params.put("phraseq" + i, phrase);
+            contentQuery.add("phraseto_tsquery('simple', :phraseq" + i + ")");
+            if (prefixQuery(phrase).isEmpty()) contentPossible = false;
         }
+
+        if (!nameMatch.isEmpty() && contentPossible) {
+            String names = String.join(" AND ", nameMatch);
+            String contents = "t.search @@ (" + String.join(" && ", contentQuery) + ")";
+            // Two index lookups (names through nodes' GIN index, contents through blob_text's),
+            // unioned, rather than one OR across the join, which no index can answer.
+            ctes.add("""
+                    hits AS (
+                      SELECT n.id FROM nodes n
+                      WHERE n.owner_id = :owner AND n.deleted_at IS NULL AND %s
+                      UNION
+                      SELECT n.id FROM blob_text t JOIN nodes n ON n.blob_hash = t.hash
+                      WHERE %s AND n.owner_id = :owner AND n.deleted_at IS NULL
+                    )""".formatted(names, contents));
+            from = "nodes n JOIN hits h ON h.id = n.id LEFT JOIN blob_text t ON t.hash = n.blob_hash";
+            // A name match always ranks above a contents-only match: rank(…, 32) is below 1.
+            score = "CASE WHEN %s THEN 1 + %s ELSE 0 END + CASE WHEN %s THEN ts_rank(t.search, %s, 32) ELSE 0 END"
+                    .formatted(names, nameScore, contents, String.join(" && ", contentQuery));
+        } else if (!nameMatch.isEmpty()) {
+            where.addAll(nameMatch);
+            score = nameScore;
+        }
+
         if (!q.types().isEmpty()) {
             where.add(q.types().stream().map(TYPE_SQL::get).collect(Collectors.joining(" OR ", "(", ")")));
         }
@@ -117,20 +155,21 @@ public class SearchRepository {
             where.add(dateCondition(f.op(), ":day" + i));
         }
 
-        String scope = "";
+        boolean recursive = false;
         if (q.inFolder() != null) {
             // Every folder with that name, and every folder below them. Only folders are walked.
             params.put("folder", q.inFolder());
-            scope = """
-                    WITH RECURSIVE scope AS (
+            recursive = true;
+            ctes.addFirst("""
+                    scope AS (
                       SELECT id FROM nodes
                       WHERE owner_id = :owner AND is_folder AND deleted_at IS NULL AND lower(name) = lower(:folder)
                       UNION
                       SELECT c.id FROM nodes c JOIN scope s ON c.parent_id = s.id WHERE c.is_folder AND c.deleted_at IS NULL
-                    )
-                    """;
+                    )""");
             where.add("n.parent_id IN (SELECT id FROM scope)");
         }
+        String with = ctes.isEmpty() ? "" : (recursive ? "WITH RECURSIVE " : "WITH ") + String.join(",\n", ctes) + "\n";
 
         String after = "";
         if (rawCursor != null && !rawCursor.isEmpty()) {
@@ -145,12 +184,12 @@ public class SearchRepository {
         String sql = """
                 %sSELECT * FROM (
                   SELECT %s, (%s)::numeric(12, 6) AS score, n.updated_at::text AS updated_key
-                  FROM nodes n
+                  FROM %s
                   WHERE %s
                 ) m
                 %s
                 ORDER BY m.score DESC, m.updated_at DESC, m.id DESC
-                LIMIT :limit""".formatted(scope, NodeRow.columns("n"), score, String.join(" AND ", where), after);
+                LIMIT :limit""".formatted(with, NodeRow.columns("n"), score, from, String.join(" AND ", where), after);
 
         record Hit(NodeRow node, String score, String updatedKey) {}
         List<Hit> hits = tx.execute(status -> {
