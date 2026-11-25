@@ -1,0 +1,7 @@
+# Loads the app's dashboards into the grafana/otel-lgtm container (mounted by docker-compose).
+apiVersion: 1
+providers:
+  - name: "Performant FS"
+    type: file
+    options:
+      path: /otel-lgtm/pfs-dashboards

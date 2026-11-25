@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -42,8 +43,11 @@ public class Maintenance {
     private final NodeService nodes;
     private final AppProperties props;
     private final TransactionTemplate tx;
+    private final MeterRegistry meters;
 
-    Maintenance(JdbcClient db, BlobStore blobs, NodeService nodes, AppProperties props, TransactionTemplate tx) {
+    Maintenance(JdbcClient db, BlobStore blobs, NodeService nodes, AppProperties props, TransactionTemplate tx,
+                MeterRegistry meters) {
+        this.meters = meters;
         this.db = db;
         this.blobs = blobs;
         this.nodes = nodes;
@@ -56,10 +60,18 @@ public class Maintenance {
     void scheduled() {
         try {
             Report report = runOnce();
+            count("expired_uploads", report.expiredUploads());
+            count("orphan_temps", report.orphanTemps());
+            count("blobs_deleted", report.blobsDeleted());
+            count("trash_purged", report.trashPurged());
             if (report.didAnything()) log.info("maintenance: {}", report);
         } catch (RuntimeException e) {
             log.error("maintenance failed", e);
         }
+    }
+
+    private void count(String kind, int n) {
+        meters.counter("pfs.maintenance.removed", "kind", kind).increment(n);
     }
 
     public Report runOnce() {

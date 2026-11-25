@@ -21,6 +21,11 @@ repositories {
 }
 
 dependencies {
+    // Observability: health, metrics, traces and logs exported over OTLP (OpenTelemetry).
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
+    // Sends log lines to the OTLP log exporter Boot configures (only with the otel profile).
+    implementation("io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0:2.34.0-alpha")
     implementation("org.springframework.boot:spring-boot-starter-flyway")
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("org.springframework.boot:spring-boot-starter-security")

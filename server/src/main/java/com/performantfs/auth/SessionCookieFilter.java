@@ -22,6 +22,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class SessionCookieFilter extends OncePerRequestFilter {
 
     public static final String COOKIE = "sid";
+    /** Request attribute holding the authenticated user's id. */
+    public static final String USER_ATTRIBUTE = "pfs.userId";
 
     private final SessionStore sessions;
     private final Supplier<AuthUser> fallback;
@@ -38,8 +40,12 @@ public class SessionCookieFilter extends OncePerRequestFilter {
         tokenFrom(request)
                 .flatMap(sessions::find)
                 .or(() -> Optional.ofNullable(fallback).map(Supplier::get))
-                .ifPresent(user -> SecurityContextHolder.getContext().setAuthentication(
-                        UsernamePasswordAuthenticationToken.authenticated(user, null, List.of())));
+                .ifPresent(user -> {
+                    SecurityContextHolder.getContext().setAuthentication(
+                            UsernamePasswordAuthenticationToken.authenticated(user, null, List.of()));
+                    // For the access log, which runs outside Spring Security's context.
+                    request.setAttribute(USER_ATTRIBUTE, user.id());
+                });
         chain.doFilter(request, response);
     }
 

@@ -4,13 +4,17 @@ import com.performantfs.embedding.Embedder;
 import com.performantfs.nodes.Crumb;
 import com.performantfs.nodes.NodeRepository;
 import com.performantfs.nodes.NodeRow;
+import com.performantfs.observability.Observed;
+import io.micrometer.observation.ObservationRegistry;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -42,8 +46,11 @@ public class SemanticSearch {
     private final NodeRepository nodes;
     private final Embedder embedder;
     private final TransactionTemplate tx;
+    private final ObservationRegistry observations;
 
-    SemanticSearch(JdbcClient db, NodeRepository nodes, Embedder embedder, TransactionTemplate tx) {
+    SemanticSearch(JdbcClient db, NodeRepository nodes, Embedder embedder, TransactionTemplate tx,
+                   ObservationRegistry observations) {
+        this.observations = observations;
         this.db = db;
         this.nodes = nodes;
         this.embedder = embedder;
@@ -57,7 +64,8 @@ public class SemanticSearch {
 
         Map<String, Object> params = new HashMap<>();
         params.put("owner", ownerId);
-        params.put("q", ContentIndexer.vectorLiteral(embedder.embedQuery(text)));
+        float[] query = Observed.observe(observations, "pfs.search.embed", o -> embedder.embedQuery(text));
+        params.put("q", ContentIndexer.vectorLiteral(query));
         params.put("candidates", CANDIDATES);
         params.put("max", MAX_DISTANCE);
         SearchFilters filters = SearchFilters.of(q, params);
@@ -81,13 +89,22 @@ public class SemanticSearch {
                 NodeRow.columns("n"), String.join(" AND ", where));
 
         record Hit(NodeRow node, String passage, double distance) {}
-        List<Hit> hits = tx.execute(status -> {
-            // Keep scanning the index past passages the owner filter drops; scoped to this transaction.
-            db.sql("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true), set_config('hnsw.ef_search', '200', true)")
-                    .query((rs, n) -> null).list();
-            return db.sql(sql).params(params)
-                    .query((rs, n) -> new Hit(NodeRow.MAPPER.mapRow(rs, n), rs.getString("passage"), rs.getDouble("distance")))
-                    .list();
+        List<Hit> hits = Observed.observe(observations, "pfs.search.vector", o -> {
+            List<Hit> found = tx.execute(status -> {
+                // Keep scanning the index past passages the owner filter drops; scoped to this transaction.
+                db.sql("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true), set_config('hnsw.ef_search', '200', true)")
+                        .query((rs, n) -> null).list();
+                return db.sql(sql).params(params)
+                        .query((rs, n) -> new Hit(NodeRow.MAPPER.mapRow(rs, n), rs.getString("passage"), rs.getDouble("distance")))
+                        .list();
+            });
+            // What the index offered, before excluding keyword hits: id and distance per file.
+            o.highCardinalityKeyValue("files.within.threshold", String.valueOf(found.size()));
+            o.highCardinalityKeyValue("distances", found.stream()
+                    .sorted(Comparator.comparingDouble(Hit::distance)).limit(10)
+                    .map(h -> h.node().id() + "=" + String.format(Locale.ROOT, "%.3f", h.distance()))
+                    .collect(Collectors.joining(",")));
+            return found;
         });
 
         List<Hit> best = hits.stream()

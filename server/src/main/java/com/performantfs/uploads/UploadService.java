@@ -107,7 +107,6 @@ public class UploadService {
                 .update();
         // Queue the bytes for content indexing; already-known bytes keep their row and its text.
         db.sql("INSERT INTO blob_text (hash) VALUES (?) ON CONFLICT DO NOTHING").param(in.hash()).update();
-        events.publishEvent(new FileStored(in.hash()));
         nodes.getLiveFolder(in.ownerId(), in.parentId(), false);
         NodeRow node = nodes.insert(
                 new NewNode(in.ownerId(), in.parentId(), false, in.name(), in.size(), in.mime(), in.hash()),
@@ -124,11 +123,14 @@ public class UploadService {
                     .update();
             if (updated == 0) throw new ApiException(ErrorCode.QUOTA_EXCEEDED, "Not enough storage left");
         }
+        BlobStore.Promotion promotion;
         try {
-            blobs.promoteTemp(in.tempId(), in.hash());
+            promotion = blobs.promoteTemp(in.tempId(), in.hash());
         } catch (IOException e) {
             throw new UncheckedIOException(e); // rolls the transaction back
         }
+        events.publishEvent(new FileStored(in.hash(), node.id(), in.ownerId(), in.size(),
+                promotion == BlobStore.Promotion.DEDUPLICATED, in.quota() == QuotaMode.RESERVED));
         return node;
     }
 

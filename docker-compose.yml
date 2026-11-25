@@ -14,6 +14,19 @@ services:
       interval: 2s
       retries: 30
 
+  # Observability for development: an OpenTelemetry collector with Prometheus (metrics), Tempo
+  # (traces) and Loki (logs) behind Grafana, in one container. Opt in:
+  #   docker compose --profile observability up -d lgtm     → Grafana on http://localhost:3001
+  #   SPRING_PROFILES_ACTIVE=otel ./gradlew bootRun           (or the app service below)
+  lgtm:
+    image: grafana/otel-lgtm:0.41.1
+    profiles: [observability]
+    # Grafana on 3001: 3000 is often taken by a dev server. 4318 is OTLP over HTTP.
+    ports: ["3001:3000", "4317:4317", "4318:4318"]
+    volumes:
+      - ./observability/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/pfs.yaml:ro
+      - ./observability/dashboards:/otel-lgtm/pfs-dashboards:ro
+
   app:
     build: .
     depends_on:
@@ -22,6 +35,11 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/pfs
       SPRING_DATASOURCE_USERNAME: pfs
       SPRING_DATASOURCE_PASSWORD: pfs
+      # JSON logs, as a log shipper expects.
+      LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
+      # Export to the lgtm service: SPRING_PROFILES_ACTIVE=otel docker compose --profile observability up
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
+      OTLP_ENDPOINT: http://lgtm:4318
     # The UI and API on http://localhost:8091 (8090 is left for ./gradlew bootRun).
     ports: ["8091:8080"]
     volumes: [blobs:/data]
