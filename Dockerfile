@@ -26,7 +26,7 @@ COPY --from=server /server/build/libs/app.jar app.jar
 COPY --from=web /web/dist web
 COPY --from=server /server/models models
 ENV PFS_WEB_DIR=/app/web \
-    PFS_EMBEDDING_MODEL_DIR=/app/models/all-MiniLM-L6-v2 \
+    PFS_EMBEDDING_MODEL_DIR=/app/models/bge-small-en-v1.5 \
     PFS_DATA_DIR=/data \
     SERVER_PORT=8080
 USER app

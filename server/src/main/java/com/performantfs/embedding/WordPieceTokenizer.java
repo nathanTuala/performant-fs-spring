@@ -13,7 +13,7 @@ import java.util.Map;
 
 /**
  * BERT's uncased WordPiece tokenizer, matching Hugging Face's {@code BertTokenizer} for the
- * MiniLM vocabulary: clean the text, split CJK characters, lowercase and strip accents, split on
+ * uncased BERT vocabulary that bge-small (and MiniLM) use: clean the text, split CJK characters, lowercase and strip accents, split on
  * whitespace and punctuation, then break each word into the longest vocabulary pieces
  * ({@code unaffable} → {@code una ##ffa ##ble}).
  */

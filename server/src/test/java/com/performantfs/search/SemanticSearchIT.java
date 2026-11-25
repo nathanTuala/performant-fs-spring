@@ -35,6 +35,7 @@ class SemanticSearchIT extends IntegrationTest {
                         + "whether an arbitrary program eventually stops on a given input."), school);
         upload(alice, "groceries.md", utf8("Shopping list: oat milk, sourdough bread, a wedge of parmesan and cheddar."), alice.rootId());
         upload(alice, "trip.txt", utf8("Itinerary: flight to Lisbon on Friday, hotel near the river, return Monday morning."), alice.rootId());
+        upload(alice, "biology.txt", utf8("Notes on photosynthesis: plants turn sunlight, water and carbon dioxide into sugar and oxygen."), alice.rootId());
     }
 
     private void upload(TestUser user, String name, byte[] bytes, UUID parent) {
@@ -58,6 +59,12 @@ class SemanticSearchIT extends IntegrationTest {
         JsonNode res = search(alice, "computability theory assignment");
         assertThat(names(res.path("items"))).isEmpty();
         assertThat(names(res.path("related"))).first().isEqualTo("hw5.pdf");
+    }
+
+    @Test
+    void findsAnIdeaDescribedWithoutBeingNamed() {
+        // The notes never say "energy" or "transformation"; a reported miss with the first model.
+        assertThat(names(search(alice, "energy transformation").path("related"))).first().isEqualTo("biology.txt");
     }
 
     @Test

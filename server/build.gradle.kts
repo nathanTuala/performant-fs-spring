@@ -47,13 +47,13 @@ tasks.withType<Test> {
     useJUnitPlatform()
 }
 
-// The embedding model for semantic search (all-MiniLM-L6-v2, Apache 2.0). Downloaded once and
-// checked against a pinned SHA-256, not committed: it is 90 MB.
-val modelDir = layout.projectDirectory.dir("models/all-MiniLM-L6-v2")
+// The embedding model for semantic search (BAAI/bge-small-en-v1.5, MIT). Downloaded once and
+// checked against a pinned SHA-256, not committed: it is 133 MB.
+val modelDir = layout.projectDirectory.dir("models/bge-small-en-v1.5")
 val modelFiles = mapOf(
-    "model.onnx" to ("https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx"
-        to "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452"),
-    "vocab.txt" to ("https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/vocab.txt"
+    "model.onnx" to ("https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/onnx/model.onnx"
+        to "828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35"),
+    "vocab.txt" to ("https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/vocab.txt"
         to "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"),
 )
 

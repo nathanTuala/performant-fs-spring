@@ -29,10 +29,11 @@ public class SemanticSearch {
 
     /**
      * Cosine distance (1 − similarity) beyond which a passage isn't considered related. Measured
-     * on real files with MiniLM: on-topic questions landed at 0.50–0.63 from the right passage,
-     * unrelated ones at 0.72 and above.
+     * with bge-small on real files: ten on-topic queries landed at 0.15–0.38 from the right
+     * passage (short, abstract ones like "energy transformation" at the top of that range), and
+     * unrelated ones at 0.46 and above.
      */
-    static final double MAX_DISTANCE = 0.65;
+    static final double MAX_DISTANCE = 0.42;
     /** Passages fetched before grouping by file; more than enough for a few distinct files. */
     private static final int CANDIDATES = 100;
     private static final int SNIPPET_CHARS = 220;

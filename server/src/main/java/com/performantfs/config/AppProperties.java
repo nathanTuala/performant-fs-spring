@@ -42,5 +42,5 @@ public record AppProperties(
         @DefaultValue("30s") Duration indexInterval,
         @DefaultValue("true") boolean signInRequired,
         @DefaultValue("false") boolean secureCookies,
-        @DefaultValue("models/all-MiniLM-L6-v2") Path embeddingModelDir,
+        @DefaultValue("models/bge-small-en-v1.5") Path embeddingModelDir,
         Path webDir) {}

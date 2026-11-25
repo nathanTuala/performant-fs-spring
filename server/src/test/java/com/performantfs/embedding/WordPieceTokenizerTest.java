@@ -17,7 +17,7 @@ import tools.jackson.databind.json.JsonMapper;
  */
 class WordPieceTokenizerTest {
 
-    static final Path MODEL = Path.of("models/all-MiniLM-L6-v2");
+    static final Path MODEL = Path.of("models/bge-small-en-v1.5");
     private static WordPieceTokenizer tokenizer;
     private static JsonNode reference;
 

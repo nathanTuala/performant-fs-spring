@@ -16,15 +16,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
- * all-MiniLM-L6-v2 run with ONNX Runtime on the CPU, in-process: no service to call, and file
- * contents never leave the server. Same output as sentence-transformers: the token vectors are
- * averaged (padding excluded) and scaled to unit length.
+ * BAAI/bge-small-en-v1.5 run with ONNX Runtime on the CPU, in-process: no service to call, and
+ * file contents never leave the server. As the model was trained: a text is represented by its
+ * [CLS] token's vector, scaled to unit length, and queries (not passages) are prefixed with the
+ * retrieval instruction, which helps short queries like "energy transformation" find passages
+ * that describe the idea without naming it.
  */
 @Component
 public class OnnxEmbedder implements Embedder {
 
     /** The model was trained on passages up to this long; longer input is cut. */
     static final int MAX_TOKENS = 256;
+    static final String QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: ";
     private static final int BATCH = 16;
 
     private final OrtEnvironment env = OrtEnvironment.getEnvironment();
@@ -56,10 +59,9 @@ public class OnnxEmbedder implements Embedder {
         return embed(passages);
     }
 
-    /** all-MiniLM-L6-v2 is symmetric: a query is embedded exactly like a passage. */
     @Override
     public float[] embedQuery(String query) {
-        return embed(List.of(query))[0];
+        return embed(List.of(QUERY_INSTRUCTION + query))[0];
     }
 
     private float[][] embed(List<String> texts) {
@@ -94,29 +96,20 @@ public class OnnxEmbedder implements Embedder {
              OrtSession.Result result = session.run(Map.of("input_ids", idsT, "attention_mask", maskT, "token_type_ids", typesT))) {
             float[][][] hidden = (float[][][]) result.get(0).getValue();
             float[][] vectors = new float[texts.size()][];
-            for (int i = 0; i < hidden.length; i++) vectors[i] = meanPoolAndNormalize(hidden[i], mask[i]);
+            for (int i = 0; i < hidden.length; i++) vectors[i] = normalize(hidden[i][0]); // [CLS]
             return vectors;
         } catch (OrtException e) {
             throw new IllegalStateException("embedding failed", e);
         }
     }
 
-    static float[] meanPoolAndNormalize(float[][] tokens, long[] mask) {
-        float[] sum = new float[tokens[0].length];
-        int count = 0;
-        for (int t = 0; t < tokens.length; t++) {
-            if (mask[t] == 0) continue;
-            count++;
-            for (int d = 0; d < sum.length; d++) sum[d] += tokens[t][d];
-        }
+    static float[] normalize(float[] v) {
         double norm = 0;
-        for (int d = 0; d < sum.length; d++) {
-            sum[d] /= Math.max(count, 1);
-            norm += (double) sum[d] * sum[d];
-        }
+        for (float x : v) norm += (double) x * x;
         float scale = (float) (1 / Math.max(Math.sqrt(norm), 1e-12));
-        for (int d = 0; d < sum.length; d++) sum[d] *= scale;
-        return sum;
+        float[] out = new float[v.length];
+        for (int d = 0; d < v.length; d++) out[d] = v[d] * scale;
+        return out;
     }
 
     @PreDestroy

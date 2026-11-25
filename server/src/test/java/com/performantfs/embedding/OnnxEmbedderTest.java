@@ -18,7 +18,7 @@ class OnnxEmbedderTest {
 
     @BeforeAll
     static void load() throws Exception {
-        embedder = new OnnxEmbedder(Path.of("models/all-MiniLM-L6-v2"));
+        embedder = new OnnxEmbedder(Path.of("models/bge-small-en-v1.5"));
     }
 
     @AfterAll
@@ -45,6 +45,20 @@ class OnnxEmbedderTest {
             JsonNode expected = reference.path("embeddings").get(i).path("first8");
             for (int d = 0; d < 8; d++) {
                 assertThat(vectors[i][d]).as(texts.get(i) + " [" + d + "]").isCloseTo(expected.get(d).floatValue(), within(1e-4f));
+            }
+        }
+    }
+
+    @Test
+    void prefixesQueriesWithTheRetrievalInstruction() throws Exception {
+        JsonNode reference;
+        try (InputStream in = getClass().getResourceAsStream("/embedding/reference.json")) {
+            reference = JsonMapper.builder().build().readTree(in);
+        }
+        for (JsonNode q : reference.path("queries")) {
+            float[] v = embedder.embedQuery(q.path("text").asString());
+            for (int d = 0; d < 8; d++) {
+                assertThat(v[d]).as(q.path("text").asString() + " [" + d + "]").isCloseTo(q.path("first8").get(d).floatValue(), within(1e-4f));
             }
         }
     }
