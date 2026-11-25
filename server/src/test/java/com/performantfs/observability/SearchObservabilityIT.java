@@ -54,4 +54,15 @@ class SearchObservabilityIT extends IntegrationTest {
         // High-cardinality values (ids, text) must never become metric tags.
         assertThat(timer.getId().getTags()).noneMatch(t -> t.getKey().equals("query") || t.getKey().equals("result.ids"));
     }
+
+    @Test
+    void healthChecksAreNotTracedButRealRequestsAre() {
+        var alice = newUser();
+        recorder.clear();
+        anonymous().get("/api/health");
+        alice.api().get("/api/nodes/" + alice.rootId() + "/children");
+        assertThat(recorder.named("http.server.requests")).extracting(r -> r.low().get("uri"))
+                .contains("/api/nodes/{id}/children")
+                .doesNotContain("/api/health");
+    }
 }
