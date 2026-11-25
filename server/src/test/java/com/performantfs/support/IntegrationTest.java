@@ -1,10 +1,16 @@
 package com.performantfs.support;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Base for end-to-end tests: the real server on a random port, backed by a real Postgres
@@ -17,6 +23,27 @@ public abstract class IntegrationTest {
 
     @LocalServerPort
     private int port;
+
+    /** Blobs go to a throwaway directory; small chunks keep multi-chunk tests fast. */
+    @DynamicPropertySource
+    static void testSettings(DynamicPropertyRegistry registry) {
+        registry.add("pfs.data-dir", () -> tempDataDir().toString());
+        registry.add("pfs.chunk-size", () -> "1MB");
+        registry.add("pfs.fast-path-max", () -> "1MB");
+    }
+
+    private static Path dataDir;
+
+    private static synchronized Path tempDataDir() {
+        if (dataDir == null) {
+            try {
+                dataDir = Files.createTempDirectory("pfs-test-");
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+        return dataDir;
+    }
 
     /** A client with no session. */
     protected ApiClient anonymous() {
@@ -45,6 +72,17 @@ public abstract class IntegrationTest {
 
         public UUID folder(String name) {
             return folder(name, rootId);
+        }
+
+        /** Single-request upload; returns the created node. */
+        public tools.jackson.databind.JsonNode uploadSmall(String name, byte[] bytes, UUID parentId) {
+            var res = api.post("/api/files?parentId=" + parentId + "&name=" + java.net.URLEncoder.encode(name, java.nio.charset.StandardCharsets.UTF_8), bytes);
+            if (res.status() != 201) throw new IllegalStateException("upload failed: " + res.status() + " " + res.text());
+            return res.json();
+        }
+
+        public tools.jackson.databind.JsonNode uploadSmall(String name, byte[] bytes) {
+            return uploadSmall(name, bytes, rootId);
         }
 
         /** GET /api/nodes/{folder}/children with an optional query string (e.g. "?limit=4"). */
