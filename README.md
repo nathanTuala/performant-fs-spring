@@ -49,6 +49,8 @@ Files up to 8 MB use `POST /api/files`, which hashes while streaming. Neither pa
 - **Range and caching:** single Range requests (206/416), `If-Range`, and ETag/304 with `immutable` caching.
 - **Safety:** responses carry `nosniff` and a sandboxing CSP. HTML, SVG and XML are only ever served as `text/plain` or as attachments, so an uploaded file can't run script on our origin.
 
+**Search** (`search/`) parses `quarterly report "exact phrase" type:pdf size:>10mb modified:<2026-01-01 in:"Tax returns"`. Words match as prefixes through a tsvector GIN index, or fuzzily through a trigram index (typos like "quartrly" work). Results are ranked, keyset-paginated, and shown with their folder path.
+
 **Data access** uses Spring's `JdbcClient` with plain SQL and Flyway migrations, not JPA. The tree relies on recursive CTEs, keyset row comparisons, partial unique indexes with `ON CONFLICT`, data-modifying CTEs and advisory locks, all first-class in SQL and awkward in an ORM.
 
 ### Concurrency decisions
@@ -107,5 +109,5 @@ Everything that does file-system work is written in this repo:
 
 ## Status
 
-- **Done:** auth, uploads (chunked, resumable, parallel, single-request, folder trees), listing, move/rename/bulk move with undo, trash and restore, downloads with Range, quota, background maintenance, web app, Docker image.
-- **Next:** search (ported from the Node version), then content search with Apache Tika, then semantic search with pgvector.
+- **Done:** auth, uploads (chunked, resumable, parallel, single-request, folder trees), listing, move/rename/bulk move with undo, trash and restore, downloads with Range, quota, background maintenance, web app, Docker image, search by name (as-you-type, prefixes, typos, filters, `in:` scope).
+- **Next:** content search with Apache Tika (find words inside PDFs and text files), then semantic search with pgvector.

@@ -99,6 +99,19 @@ class FoldersIT extends IntegrationTest {
         }
     }
 
+    @Autowired NodeRepository nodes;
+
+    @Test
+    void batchedPathsMatchSinglePathsForEveryId() {
+        var alice = newUser();
+        UUID a = alice.folder("paths-a");
+        UUID b = alice.folder("paths-b", a);
+        UUID c = alice.folder("paths-c", b);
+        var paths = nodes.paths(List.of(alice.rootId(), a, c));
+        for (UUID id : List.of(alice.rootId(), a, c)) assertThat(paths.get(id)).isEqualTo(nodes.path(id));
+        assertThat(paths.get(c)).extracting(Crumb::name).containsExactly("My Files", "paths-a", "paths-b");
+    }
+
     @Test
     void rejectsBadListingParameters() {
         var alice = newUser();
