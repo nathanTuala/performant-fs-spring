@@ -32,6 +32,8 @@ export interface FileListActions {
 }
 
 interface Props {
+  /** The folder being shown: where a drop on the list itself (not on a folder row) moves items. */
+  folderId: string;
   listing: Listing;
   sort: SortKey;
   dir: SortDir;
@@ -46,7 +48,7 @@ interface Props {
  * their contents are spliced in below them as indented rows of the same virtual list.
  * Render with a `key` per folder and sort so selection, scroll and expansion reset.
  */
-export function FileList({ listing, sort, dir, onSort, actions, emptyHint }: Props) {
+export function FileList({ folderId, listing, sort, dir, onSort, actions, emptyHint }: Props) {
   const { items } = listing;
   const expansion = useExpansion(sort, dir);
   const { flatten } = expansion;
@@ -238,35 +240,51 @@ export function FileList({ listing, sort, dir, onSort, actions, emptyHint }: Pro
 
   // ------------------------------------------------------------ drag to move
 
+  // What's being dragged from this list. The browser hides drag data until the drop, so this
+  // is how a drag-over knows whether a target would actually change anything.
+  const dragged = useRef<MovedItem[]>([]);
+
   function onDragStart(e: DragEvent, node: NodeDto) {
     const nodes = selected.has(node.id) ? selectedNodes() : [node];
     if (!selected.has(node.id)) setSelected(new Set([node.id]));
     const items: MovedItem[] = nodes.map((n) => ({ id: n.id, parentId: n.parentId! }));
+    dragged.current = items;
     e.dataTransfer.setData(DRAG_MIME, JSON.stringify(items));
     e.dataTransfer.effectAllowed = 'move';
   }
 
-  function canDropOn(e: DragEvent, target: NodeDto): boolean {
-    if (target.kind !== 'folder' || !e.dataTransfer.types.includes(DRAG_MIME)) return false;
-    // A folder can't be dropped onto itself (deeper cycles are rejected by the server).
-    return !selected.has(target.id);
+  /**
+   * Where a drop on a row goes, as in Finder: onto a folder → into it; onto a file → into the
+   * folder that file is in, which for a file inside an expanded folder means dragging it out
+   * to the level it's dropped at. A top-level file stands for the folder being shown.
+   */
+  const dropFolderFor = (row: Extract<TreeRow, { type: 'node' }>) =>
+    row.node.kind === 'folder' ? row.node.id : (row.parentId ?? folderId);
+
+  function canDropInto(e: DragEvent, targetId: string): boolean {
+    if (!e.dataTransfer.types.includes(DRAG_MIME)) return false;
+    const items = dragged.current;
+    // Not into itself (deeper cycles are refused by the server), and not where everything already is.
+    if (items.some((i) => i.id === targetId)) return false;
+    return items.length === 0 || items.some((i) => i.parentId !== targetId);
   }
 
-  function onDragOver(e: DragEvent, target: NodeDto) {
+  function onDragOver(e: DragEvent, targetId: string) {
     if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
     e.preventDefault();
     e.stopPropagation();
-    const ok = canDropOn(e, target);
+    const ok = canDropInto(e, targetId);
     e.dataTransfer.dropEffect = ok ? 'move' : 'none';
-    setDropTarget(ok ? target.id : null);
+    setDropTarget(ok ? targetId : null);
   }
 
-  function onDrop(e: DragEvent, target: NodeDto) {
+  function onDrop(e: DragEvent, targetId: string) {
     setDropTarget(null);
-    if (!canDropOn(e, target)) return;
+    if (!canDropInto(e, targetId)) return;
     e.preventDefault();
     e.stopPropagation();
-    move(readDragItems(e.dataTransfer), target.id);
+    const items = readDragItems(e.dataTransfer).filter((i) => i.parentId !== targetId);
+    if (items.length > 0) move(items, targetId);
     setSelected(new Set());
   }
 
@@ -321,13 +339,18 @@ export function FileList({ listing, sort, dir, onSort, actions, emptyHint }: Pro
 
       <div
         ref={scroller}
-        className="rows"
+        className={`rows${dropTarget === folderId ? ' drop-target' : ''}`}
         role="treegrid"
         aria-rowcount={rows.length}
         aria-label="Files"
         tabIndex={0}
         onKeyDown={onKeyDown}
         onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+        // Empty space in the list (and anything not handled by a row) means "this folder".
+        onDragOver={(e) => onDragOver(e, folderId)}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget(null); }}
+        onDrop={(e) => onDrop(e, folderId)}
+        onDragEnd={() => { dragged.current = []; setDropTarget(null); }}
       >
         {items.length === 0 && !listing.loading && <div className="empty">{listing.error ?? emptyHint}</div>}
         {items.length === 0 && listing.loading && <SkeletonRows />}
@@ -352,9 +375,8 @@ export function FileList({ listing, sort, dir, onSort, actions, emptyHint }: Pro
                 style={style}
                 draggable={renaming !== node.id}
                 onDragStart={(e) => onDragStart(e, node)}
-                onDragOver={(e) => onDragOver(e, node)}
-                onDragLeave={() => setDropTarget(null)}
-                onDrop={(e) => onDrop(e, node)}
+                onDragOver={(e) => onDragOver(e, dropFolderFor(row))}
+                onDrop={(e) => onDrop(e, dropFolderFor(row))}
                 onClick={(e) => select(index, e)}
                 onDoubleClick={() => actions.open(node)}
                 onContextMenu={(e) => onContextMenu(e, index)}

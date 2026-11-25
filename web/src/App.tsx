@@ -146,17 +146,21 @@ function FolderView({ folderId, rootId, onChanged }: { folderId: string; rootId:
   }, [listing]);
 
   const move = useCallback(async (items: MovedItem[], targetId: string) => {
+    items = items.filter((i) => i.parentId !== targetId); // already there
+    if (items.length === 0) return;
     const ids = new Set(items.map((i) => i.id));
     listing.update((list) => list.filter((n) => !ids.has(n.id))); // optimistic
     try {
       await api.move([...ids], targetId);
       lastMove.current = items;
+      // Dragged out of an expanded folder into this one: they belong in this listing now.
+      if (targetId === folderId) listing.reload();
       toast(`Moved ${ids.size} item${ids.size === 1 ? '' : 's'}`, { action: { label: 'Undo', run: () => void undoMove() } });
     } catch (err) {
       listing.reload(); // roll back
       toastError(err);
     }
-  }, [listing, undoMove]);
+  }, [folderId, listing, undoMove]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -258,6 +262,7 @@ function FolderView({ folderId, rootId, onChanged }: { folderId: string; rootId:
       </header>
       <FileList
         key={`${folderId}:${sort.key}:${sort.dir}`}
+        folderId={folderId}
         listing={listing}
         sort={sort.key}
         dir={sort.dir}
