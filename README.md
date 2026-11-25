@@ -17,7 +17,7 @@ Development:
 
 ```bash
 docker compose up -d db              # Postgres on localhost:5434
-cd server && ./gradlew bootRun       # API on :8090 (downloads Java 25 and the 90 MB embedding model on first run)
+cd server && ./gradlew bootRun       # API on :8090 (downloads Java 25 and the 133 MB embedding model on first run)
 cd web && npm install && npm run dev # UI on :5173, proxies /api to :8090
 cd server && ./gradlew test          # unit + integration tests against a real Postgres (Testcontainers)
 ```
@@ -61,9 +61,9 @@ Files up to 8 MB use `POST /api/files`, which hashes while streaming. Neither pa
 - *Querying:* every word must be in the name, or every word in the contents. The two are separate index lookups, unioned, so both stay indexed. Name matches rank first. Results found by contents carry a snippet built from a ~300-character window around the first match, for the returned page only. Highlights are character ranges, never markup.
 
 **Semantic search** finds files by meaning: "what if my internet cuts out while sending a big file" finds the design doc's section on resumable uploads, though they share no words.
-- *Model:* all-MiniLM-L6-v2 (384 dimensions), run in-process with ONNX Runtime on the CPU. No API key, no cost, and file contents never leave the server. `./gradlew downloadModel` fetches it and checks a pinned SHA-256. The WordPiece tokenizer is ours, tested id-for-id against Hugging Face's.
+- *Model:* BAAI/bge-small-en-v1.5 (384 dimensions), run in-process with ONNX Runtime on the CPU. No API key, no cost, and file contents never leave the server. `./gradlew downloadModel` fetches it and checks a pinned SHA-256. The WordPiece tokenizer is ours, tested id-for-id against Hugging Face's. Queries carry bge's retrieval instruction; passages don't. It replaced all-MiniLM-L6-v2 after "energy transformation" missed notes on photosynthesis: MiniLM scored some on-topic pairs worse than unrelated ones, so no threshold worked.
 - *Indexing:* the same background worker splits each file's text into 120-word passages overlapping by 30 (at most 100 per file) and embeds them. Passages go into `blob_chunks` (pgvector, HNSW cosine index), keyed by blob like the text, and are saved in the same transaction as the text.
-- *Querying:* the query is embedded (a few ms) and matched to the nearest passages. The scan keeps only the searcher's own live files, and pgvector's iterative scan keeps going so that filter can't starve the results. The same `type:` / `size:` / `modified:` / `in:` filters apply. A file counts as related when its best passage is within cosine distance 0.65, a cut measured on real files: on-topic queries scored 0.50–0.63, unrelated ones 0.72 and up.
+- *Querying:* the query is embedded (a few ms) and matched to the nearest passages. The scan keeps only the searcher's own live files, and pgvector's iterative scan keeps going so that filter can't starve the results. The same `type:` / `size:` / `modified:` / `in:` filters apply. A file counts as related when its best passage is within cosine distance 0.42, a cut measured on real files: ten on-topic queries scored 0.15–0.38, unrelated ones 0.46 and up.
 - *Results:* keyword results stay exact and paginated. The first page also carries up to 8 files **related by meaning** that keyword search didn't already find, each with the passage that matched. They're a separate group, not blended into the ranking, so it's always clear why a file is there.
 
 **Data access** uses Spring's `JdbcClient` with plain SQL and Flyway migrations, not JPA. The tree relies on recursive CTEs, keyset row comparisons, partial unique indexes with `ON CONFLICT`, data-modifying CTEs and advisory locks, all first-class in SQL and awkward in an ORM.
@@ -113,7 +113,7 @@ Rule from Grand Charter: high-level libraries that ship file-management function
 | Spring Boot (Web MVC, Security, JDBC, Validation) | HTTP framework, auth plumbing, database access, request validation |
 | Flyway | Database migrations |
 | ONNX Runtime | Runs the embedding model for semantic search on the CPU. Passages, storage, querying and the tokenizer are ours. |
-| all-MiniLM-L6-v2 (model weights, Apache 2.0) | Embeds text for semantic search |
+| bge-small-en-v1.5 (model weights, MIT) | Embeds text for semantic search |
 | pgvector (Postgres extension) | Vector column and nearest-neighbour index |
 | Apache PDFBox | Reads the text out of PDFs for content search. A parser for one format; indexing, queueing and querying are ours. |
 | PostgreSQL JDBC driver | Database driver |
