@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -30,6 +31,7 @@ public class OnnxEmbedder implements Embedder {
     private final OrtSession session;
     private final WordPieceTokenizer tokenizer;
 
+    @Autowired
     public OnnxEmbedder(AppProperties props) throws IOException, OrtException {
         this(props.embeddingModelDir());
     }
