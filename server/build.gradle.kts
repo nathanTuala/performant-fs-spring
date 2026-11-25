@@ -29,6 +29,8 @@ dependencies {
     implementation("org.flywaydb:flyway-database-postgresql")
     // Reads the text out of PDFs for content search. Text and code files are read directly.
     implementation("org.apache.pdfbox:pdfbox:3.0.8")
+    // Runs the embedding model for semantic search, on the CPU, inside the app.
+    implementation("com.microsoft.onnxruntime:onnxruntime:1.32.0")
     runtimeOnly("org.postgresql:postgresql")
     testImplementation("org.springframework.boot:spring-boot-starter-flyway-test")
     testImplementation("org.springframework.boot:spring-boot-starter-jdbc-test")
