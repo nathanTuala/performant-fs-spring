@@ -143,4 +143,11 @@ class SearchIT extends IntegrationTest {
         assertThat(SearchRepository.prefixQuery("/")).isEmpty();
         assertThat(SearchRepository.prefixQuery("Café")).isEqualTo("café:*");
     }
+
+    @Test
+    void phraseQueriesKeepWordOrderAndAllowPrefixes() {
+        assertThat(SearchRepository.phraseQuery("Halting  prob")).isEqualTo("halting:* <-> prob:*");
+        assertThat(SearchRepository.phraseQuery("a & b | !c")).isEqualTo("a:* <-> b:* <-> c:*");
+        assertThat(SearchRepository.phraseQuery("--")).isEmpty();
+    }
 }

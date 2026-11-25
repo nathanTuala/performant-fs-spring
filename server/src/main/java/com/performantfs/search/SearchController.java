@@ -1,7 +1,6 @@
 package com.performantfs.search;
 
 import com.performantfs.auth.AuthUser;
-import com.performantfs.nodes.NodeWithPath;
 import com.performantfs.nodes.Page;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -22,7 +21,7 @@ class SearchController {
     }
 
     @GetMapping("/api/search")
-    Page<NodeWithPath> search(
+    Page<SearchHit> search(
             @AuthenticationPrincipal AuthUser user,
             @RequestParam @Size(max = 500) String q,
             @RequestParam(required = false) String cursor,

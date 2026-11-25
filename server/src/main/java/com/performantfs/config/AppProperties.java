@@ -20,6 +20,8 @@ import org.springframework.util.unit.DataSize;
  * @param sessionTtl        lifetime of a sign-in session
  * @param trashRetention    trashed items are purged after this long
  * @param maintenanceInterval pause between background maintenance runs
+ * @param indexInterval     how often the content indexer looks for queued files it wasn't woken
+ *                          for (uploads wake it straight away; this catches crashes and backlogs)
  * @param secureCookies     mark the session cookie Secure (on in production, behind HTTPS)
  * @param webDir            the built web app to serve (web/dist); unset in development, where Vite serves it
  */
@@ -34,5 +36,6 @@ public record AppProperties(
         @DefaultValue("30d") Duration sessionTtl,
         @DefaultValue("30d") Duration trashRetention,
         @DefaultValue("1m") Duration maintenanceInterval,
+        @DefaultValue("30s") Duration indexInterval,
         @DefaultValue("false") boolean secureCookies,
         Path webDir) {}

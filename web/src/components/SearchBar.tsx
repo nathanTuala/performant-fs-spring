@@ -73,7 +73,7 @@ export function SearchBar({ current }: { current: string | null }) {
         ref={input}
         type="search"
         aria-label="Search files and folders"
-        placeholder="Search files and folders  ( / )"
+        placeholder="Search names and contents  ( / )"
         value={value}
         onChange={(e) => {
           const next = e.target.value;
