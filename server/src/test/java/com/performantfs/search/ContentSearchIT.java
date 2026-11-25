@@ -97,6 +97,7 @@ class ContentSearchIT extends IntegrationTest {
     void matchesPhrasesAsWordsInOrder() {
         assertThat(names(alice, "\"halting problem\"")).containsExactly("hw5.pdf");
         assertThat(names(alice, "\"problem halting\"")).isEmpty();
+        assertThat(names(alice, "\"halting prob")).as("still typing the phrase").containsExactly("hw5.pdf");
     }
 
     @Test

@@ -81,6 +81,17 @@ public class SearchRepository {
                 .collect(Collectors.joining(" & "));
     }
 
+    /**
+     * "halting prob" → "halting:* &lt;-&gt; prob:*": the words in this order, next to each other,
+     * the last (like every word) possibly still being typed.
+     */
+    static String phraseQuery(String phrase) {
+        return NOT_WORD.splitAsStream(phrase.toLowerCase(Locale.ROOT))
+                .filter(w -> !w.isEmpty())
+                .map(w -> w + ":*")
+                .collect(Collectors.joining(" <-> "));
+    }
+
     public Page<SearchHit> search(UUID ownerId, SearchQuery q, int limit, String rawCursor) {
         Map<String, Object> params = new HashMap<>();
         params.put("owner", ownerId);
@@ -114,9 +125,10 @@ public class SearchRepository {
             params.put("phrase" + i, "%" + escapeLike(phrase.toLowerCase(Locale.ROOT)) + "%");
             nameMatch.add("lower(n.name) LIKE :phrase" + i);
             // In contents a phrase is words in that order; one with no words can't match there.
-            params.put("phraseq" + i, phrase);
-            contentQuery.add("phraseto_tsquery('simple', :phraseq" + i + ")");
-            if (prefixQuery(phrase).isEmpty()) contentPossible = false;
+            String words = phraseQuery(phrase);
+            params.put("phraseq" + i, words);
+            contentQuery.add("to_tsquery('simple', :phraseq" + i + ")");
+            if (words.isEmpty()) contentPossible = false;
         }
 
         if (!nameMatch.isEmpty() && contentPossible) {
