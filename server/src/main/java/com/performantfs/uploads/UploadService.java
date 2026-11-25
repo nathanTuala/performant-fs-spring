@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -43,13 +44,16 @@ public class UploadService {
     private final BlobStore blobs;
     private final AppProperties props;
     private final TransactionTemplate tx;
+    private final ApplicationEventPublisher events;
 
-    UploadService(JdbcClient db, NodeRepository nodes, BlobStore blobs, AppProperties props, TransactionTemplate tx) {
+    UploadService(JdbcClient db, NodeRepository nodes, BlobStore blobs, AppProperties props, TransactionTemplate tx,
+                  ApplicationEventPublisher events) {
         this.db = db;
         this.nodes = nodes;
         this.blobs = blobs;
         this.props = props;
         this.tx = tx;
+        this.events = events;
     }
 
     /** A small file in one request: hashed while it streams to disk, so it is never read twice. */
@@ -103,6 +107,7 @@ public class UploadService {
                 .update();
         // Queue the bytes for content indexing; already-known bytes keep their row and its text.
         db.sql("INSERT INTO blob_text (hash) VALUES (?) ON CONFLICT DO NOTHING").param(in.hash()).update();
+        events.publishEvent(new FileStored(in.hash()));
         nodes.getLiveFolder(in.ownerId(), in.parentId(), false);
         NodeRow node = nodes.insert(
                 new NewNode(in.ownerId(), in.parentId(), false, in.name(), in.size(), in.mime(), in.hash()),
