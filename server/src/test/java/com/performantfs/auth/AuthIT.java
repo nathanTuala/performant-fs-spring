@@ -27,7 +27,10 @@ class AuthIT extends IntegrationTest {
 
         var me = client.get("/api/auth/me");
         assertThat(me.status()).isEqualTo(200);
-        assertThat(me.json()).isEqualTo(res.json());
+        assertThat(me.json().path("id")).isEqualTo(res.json().path("id"));
+        assertThat(me.json().path("email")).isEqualTo(res.json().path("email"));
+        assertThat(me.json().path("rootId")).isEqualTo(res.json().path("rootId"));
+        assertThat(me.json().path("signInRequired").asBoolean()).isTrue();
     }
 
     @Test

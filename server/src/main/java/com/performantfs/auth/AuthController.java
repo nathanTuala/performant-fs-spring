@@ -1,5 +1,6 @@
 package com.performantfs.auth;
 
+import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import com.performantfs.config.AppProperties;
 import com.performantfs.http.ApiException;
 import com.performantfs.http.ErrorCode;
@@ -22,6 +23,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/auth")
 class AuthController {
+
+    /** The current user, and whether the app asks people to sign in at all. */
+    record Me(@JsonUnwrapped AuthUser user, boolean signInRequired) {}
 
     record Credentials(
             @NotBlank @Email @Size(max = 254) String email,
@@ -57,9 +61,9 @@ class AuthController {
     }
 
     @GetMapping("/me")
-    AuthUser me(@AuthenticationPrincipal AuthUser user) {
+    Me me(@AuthenticationPrincipal AuthUser user) {
         if (user == null) throw new ApiException(ErrorCode.UNAUTHORIZED, "Sign in to continue");
-        return user;
+        return new Me(user, props.signInRequired());
     }
 
     private ResponseEntity<AuthUser> signedIn(HttpStatus status, AuthUser user) {

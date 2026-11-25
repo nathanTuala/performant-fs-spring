@@ -9,22 +9,27 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
  * Turns a valid session cookie into an authenticated {@link AuthUser} for this request. Requests
- * without one carry on anonymously; Spring Security then answers 401 wherever a user is required.
+ * without one carry on anonymously, and Spring Security answers 401 wherever a user is required,
+ * unless sign-in is switched off: then they act as the {@code fallback} account.
  */
 public class SessionCookieFilter extends OncePerRequestFilter {
 
     public static final String COOKIE = "sid";
 
     private final SessionStore sessions;
+    private final Supplier<AuthUser> fallback;
 
-    public SessionCookieFilter(SessionStore sessions) {
+    /** @param fallback who a request without a session is, or null to leave it anonymous */
+    public SessionCookieFilter(SessionStore sessions, Supplier<AuthUser> fallback) {
         this.sessions = sessions;
+        this.fallback = fallback;
     }
 
     @Override
@@ -32,6 +37,7 @@ public class SessionCookieFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         tokenFrom(request)
                 .flatMap(sessions::find)
+                .or(() -> Optional.ofNullable(fallback).map(Supplier::get))
                 .ifPresent(user -> SecurityContextHolder.getContext().setAuthentication(
                         UsernamePasswordAuthenticationToken.authenticated(user, null, List.of())));
         chain.doFilter(request, response);

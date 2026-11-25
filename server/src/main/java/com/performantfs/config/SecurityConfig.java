@@ -1,5 +1,6 @@
 package com.performantfs.config;
 
+import com.performantfs.auth.LocalAccount;
 import com.performantfs.auth.SessionCookieFilter;
 import com.performantfs.auth.SessionStore;
 import com.performantfs.http.ErrorBody;
@@ -27,10 +28,11 @@ import tools.jackson.databind.json.JsonMapper;
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain api(HttpSecurity http, AuthenticationEntryPoint jsonUnauthorized, SessionStore sessions)
-            throws Exception {
+    SecurityFilterChain api(HttpSecurity http, AuthenticationEntryPoint jsonUnauthorized, SessionStore sessions,
+                            AppProperties props, LocalAccount local) throws Exception {
+        var sessionFilter = new SessionCookieFilter(sessions, props.signInRequired() ? null : local::get);
         return http
-                .addFilterBefore(new SessionCookieFilter(sessions), AnonymousAuthenticationFilter.class)
+                .addFilterBefore(sessionFilter, AnonymousAuthenticationFilter.class)
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .formLogin(f -> f.disable())
